@@ -596,16 +596,14 @@ ML.Panels = function (E) {
     if (ST.panel) {
       top.append(ib('back', 'Kembali', closePanel), h('div', { class: 'top-title', text: TITLES[ST.panel.kind] }));
       if (ST.panel.kind === 'fx') top.append(ib('plus', 'Tambahkan efek', () => effectBrowser(E.sel())), ib('copyAll', 'Salin semua efek', () => fxCopy(E.sel())), ib('paste', 'Tempel efek', () => fxPaste(E.sel())));
-      if (ML.uiMode() === 'desk') top.append(ML.uiSwitch());
       return;
     }
     if (L) {
       const nm = h('input', { class: 'ed-name', type: 'text', value: L.name, oninput: e => { E.cp('nm' + L.id); L.name = e.target.value; E.scheduleSave(); }, onchange: () => E.buildLanes() });
       top.append(ib('back', 'Batal pilih layer', () => E.select(null)), nm, ib('copy', 'Duplikat layer', E.dupSel), ib('trash', 'Hapus layer', E.delSel), ib('more', 'Menu layer', layerMenu));
-      if (ML.uiMode() === 'desk') top.append(ML.uiSwitch());
       return;
     }
-    top.append(ib('back', 'Kembali', E.exit), E.nameIn, ML.uiSwitch(), ib('gear', 'Pengaturan', E.settingsSheet), ib('export', 'Ekspor', E.exportSheet));
+    top.append(ib('back', 'Kembali', E.exit), E.nameIn, ib('gear', 'Pengaturan', E.settingsSheet), ib('export', 'Ekspor', E.exportSheet));
   }
   function renderTools() {
     const L = E.sel(), host = E.tools; host.replaceChildren();

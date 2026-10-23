@@ -552,7 +552,6 @@ ML.Editor = function (proj) {
       body.append(PN.sec('Nama proyek'), h('input', { class: 'txt', type: 'text', value: proj.name, oninput: e => { nameIn.value = e.target.value; dirty = true; scheduleSave(); } }),
         PN.sec('Warna latar'), bgBtn, PN.toggleChips([[false, 'Warna'], [true, 'Transparan']], () => proj.bg === 'transparent', v => { cp(); if (v) { proj._bgS = proj.bg; proj.bg = 'transparent'; } else proj.bg = proj._bgS || '#000000'; draw(); scheduleSave(); }),
         PN.sec('Kualitas preview (makin rendah makin lancar)'), PN.toggleChips(ML.PREVIEW_Q.map(([v, l]) => [v, l]), () => ML.previewMax(), v => { ML.lsSet('ml.pv', v); layoutPv(); }),
-        PN.sec('Tampilan editor'), PN.toggleChips([['mobile', 'Mobile'], ['desk', 'Desktop']], () => ML.uiMode(), v => ML.setUi(v)),
         PN.sec('Snap (magnet) ke playhead, penanda, dan tepi layer'), PN.toggleChips([[true, 'Hidup'], [false, 'Mati']], () => ST.snap, v => { ST.snap = v; ML.lsSet('ml.snap', v ? '1' : '0'); }),
         h('button', { class: 'row-btn', html: I('flag') + 'Daftar penanda', onclick: () => { close(); markersSheet(); } }),
         formatBlock(close), h('p', { class: 'dlg-text', text: 'Sekarang: ' + proj.w + ' × ' + proj.h + ' • ' + proj.fps + ' fps • rasio ' + proj.ratio + ' • durasi ' + ML.fmt(P.dur(), proj.fps) }));
@@ -615,7 +614,7 @@ ML.Editor = function (proj) {
   window.addEventListener('keydown', onKey);
   const onResize = () => { ST.pvH = Math.min(ST.pvH, innerHeight * 0.66); layoutPv(); buildLanes(); };
   window.addEventListener('resize', onResize);
-  ML.onRootBack = () => { if (ST.panel) { PN.closePanel(); return true; } if (ST.sel) { select(null); return true; } exit(); return true; };
+  ML.onRootBack = () => { if (ST.panel) { PN.closePanel(); return true; } if (ST.sel) { select(null); return true; } return ML.confirmTap('Ketuk sekali lagi untuk keluar ke beranda', exit); };
 
   const E = { proj, P, ST, rend, box, top, tools, pframe, nameIn, sel, select, cp, changed, scheduleSave, guard, eps, buildLanes, draw, exit, settingsSheet, exportSheet,
     dupSel, delSel, splitSel, trimStart, trimEnd, toggleLock, toggleMute, toggleHide, voiceFemale, moveSel, renderBar, setUi, relayout: () => { layoutPv(); buildLanes(); } };

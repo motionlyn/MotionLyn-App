@@ -175,6 +175,7 @@ ML.toast = function (msg, ms = 2200) {
 ML.backStack = [];
 ML.pushBack = f => ML.backStack.push(f);
 ML.popBack = f => { const i = ML.backStack.lastIndexOf(f); if (i >= 0) ML.backStack.splice(i, 1); };
+ML.confirmTap = (msg, fn) => { const n = Date.now(); if (ML._ct && n - ML._ct < 2000) { ML._ct = 0; fn(); return true; } ML._ct = n; ML.toast(msg, 1800); return true; };
 window.__mlBack = () => {
   const f = ML.backStack[ML.backStack.length - 1];
   if (f) { f(); return true; }

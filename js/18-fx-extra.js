@@ -350,7 +350,7 @@ ML.chat = (() => {
 
 /* Pintu masuk aplikasi */
 (function () {
-  ML.homeBack = () => ML.home.back();
+  ML.homeBack = () => ML.home.back() || ML.confirmTap('Ketuk sekali lagi untuk keluar', () => { if (window.AndroidBridge && AndroidBridge.exitApp) AndroidBridge.exitApp(); });
   ML.onRootBack = ML.homeBack;
   // Service worker hanya untuk versi web/PWA (di APK aset sudah ada di dalam aplikasi).
   try {

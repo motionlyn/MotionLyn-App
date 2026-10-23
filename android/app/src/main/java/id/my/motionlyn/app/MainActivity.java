@@ -123,7 +123,7 @@ public class MainActivity extends Activity {
         String name = URLUtil.guessFileName(url, cd, mime);
         if (url.startsWith("blob:")) {
             String js = "(async function(){try{var r=await fetch('" + url + "');var bl=await r.blob();"
-                    + "AndroidBridge.begin(" + q(name) + "," + q(mime == null ? bl.type : mime) + ");"
+                    + "AndroidBridge.begin(" + q(name) + "," + q(mime == null ? "application/octet-stream" : mime) + ");"
                     + "var C=786432,o=0;while(o<bl.size){var buf=await bl.slice(o,o+C).arrayBuffer();"
                     + "var u=new Uint8Array(buf),st='';for(var i=0;i<u.length;i+=8192){st+=String.fromCharCode.apply(null,u.subarray(i,i+8192));}"
                     + "AndroidBridge.chunk(btoa(st));o+=C;}AndroidBridge.end();}catch(e){AndroidBridge.fail(String(e));}})();";

@@ -1,0 +1,42 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'id.my.motionlyn.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "id.my.motionlyn.app"
+        minSdk 29
+        targetSdk 34
+        versionCode 15
+        versionName "0.1.5 beta"
+    }
+
+    signingConfigs {
+        main {
+            storeFile file('motionlyn.jks')
+            storePassword 'motionlyn123'
+            keyAlias 'motionlyn'
+            keyPassword 'motionlyn123'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.main
+        }
+        debug {
+            signingConfig signingConfigs.main
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

@@ -189,6 +189,7 @@ public class MainActivity extends Activity {
             try { if (saveOut != null) saveOut.write(Base64.decode(b64, Base64.DEFAULT)); } catch (Exception e) { fail(e.toString()); }
         }
         @JavascriptInterface public void end() { MainActivity.this.end(); }
+        @JavascriptInterface public void exitApp() { runOnUiThread(() -> finish()); }
         @JavascriptInterface public void fail(String m) { MainActivity.this.fail(m); }
     }
 
@@ -211,7 +212,8 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (web.canGoBack()) web.goBack(); else super.onBackPressed();
+        web.evaluateJavascript("(function(){try{return window.__mlBack?window.__mlBack():false}catch(e){return false}})()",
+                v -> { if (!"true".equals(v)) finish(); });
     }
 
     @Override protected void onSaveInstanceState(Bundle o) { super.onSaveInstanceState(o); web.saveState(o); }

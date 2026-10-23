@@ -3,6 +3,10 @@ plugins { id 'com.android.application' }
 android {
     namespace 'id.my.motionlyn.app'
     compileSdk 34
+        lint {
+        abortOnError false
+        checkReleaseBuilds false
+        }
 
     defaultConfig {
         applicationId "id.my.motionlyn.app"

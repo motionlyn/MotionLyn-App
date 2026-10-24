@@ -5,6 +5,7 @@ const mkCv = () => document.createElement('canvas');
 const BLEND = {}; ML.BLENDS.forEach(b => BLEND[b[0]] = b[2]);
 
 function shapePath(sh, w, h) {
+  if (sh.am && ML.amShapePath) { const q = ML.amShapePath(sh, w, h); if (q) return q; }
   const p = new Path2D(), x = -w / 2, y = -h / 2;
   if (sh.kind === 'ellipse') p.ellipse(0, 0, Math.abs(w) / 2, Math.abs(h) / 2, 0, 0, Math.PI * 2);
   else if (sh.kind === 'triangle') { p.moveTo(0, y); p.lineTo(w / 2, h / 2); p.lineTo(-w / 2, h / 2); p.closePath(); }
@@ -64,7 +65,9 @@ ML.Renderer = class {
   /** matriks layer (px kanvas) + ukuran layer, dipakai efek yang butuh batas layer (Ubin V3) */
   fxGeo(L, tt, s) {
     const g = ML.geom(L, tt), c = Math.cos(g.rot), n = Math.sin(g.rot), kx = Math.tan(g.skx || 0), ky = Math.tan(g.sky || 0), sx = g.sx * s, sy = g.sy * s;
-    return { A: [c * sx - n * ky * sx, n * sx + c * ky * sx, c * kx * sy - n * sy, n * kx * sy + c * sy], T: [g.x * s, g.y * s], Z: [Math.max(1, g.w || 1), Math.max(1, g.h || 1)] };
+    let V = [0, 0, 0, 0];
+    try { const P = ML.player && ML.player.proj, fp = (P && P.fps) || 30, g0 = ML.geom(L, tt - 1 / fp); V = [(g.x - g0.x) * s, (g.y - g0.y) * s, ((g.sx + g.sy) - (g0.sx + g0.sy)) / 2, (g.rot - g0.rot) * 180 / Math.PI]; } catch (e) { /* tanpa kecepatan */ }
+    return { A: [c * sx - n * ky * sx, n * sx + c * ky * sx, c * kx * sy - n * sy, n * kx * sy + c * sy], T: [g.x * s, g.y * s], Z: [Math.max(1, g.w || 1), Math.max(1, g.h || 1)], V };
   }
 
   vals(e, lt) { const o = {}; for (const k in e.p) o[k] = ML.evalAnim(e.p[k], lt); return o; }
@@ -73,22 +76,25 @@ ML.Renderer = class {
     const W = target.width, H = target.height;
     const on = this.fx.ok ? L.fx.filter(e => e.on && ML.FXDEF[e.type]) : [];
     const mb = on.find(e => e.type === 'motionblur');
-    const chain = on.filter(e => !ML.FXDEF[e.type].special);
+    const chain = on.filter(e => !ML.FXDEF[e.type].special), propFx = on.filter(e => ML.FXDEF[e.type].prop);
     const lt = t - L.start, op = ML.clamp(ML.evalAnim(L.p.op, lt) / 100, 0, 1);
     if (op <= 0) return;
     const blend = BLEND[L.blend] || 'source-over';
 
     const renderAt = (tt, out, alpha, mode) => {
-      const ltt = tt - L.start;
-      out.globalAlpha = alpha; out.globalCompositeOperation = mode;
-      if (!chain.length) this.content(out, proj, L, ltt, s);
-      else {
-        const lc = this.lc.getContext('2d');
-        lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalAlpha = 1; lc.globalCompositeOperation = 'source-over'; lc.clearRect(0, 0, W, H);
-        this.content(lc, proj, L, ltt, s);
-        const passes = chain.map(e => ({ type: e.type, vals: this.vals(e, ltt) }));
-        out.drawImage(this.fx.run(this.lc, target, passes, ltt, this.fxGeo(L, tt, s)), 0, 0);
-      }
+      const ltt = tt - L.start, adj = propFx.length ? ML.xmlAdj(propFx, L, ltt, proj, tt) : null;
+      ML.fxAdj = adj; ML.fxCtx = { L, proj, tt };
+      try {
+        out.globalAlpha = alpha * (adj ? adj.alpha : 1); out.globalCompositeOperation = mode;
+        if (!chain.length) this.content(out, proj, L, ltt, s);
+        else {
+          const lc = this.lc.getContext('2d');
+          lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalAlpha = 1; lc.globalCompositeOperation = 'source-over'; lc.clearRect(0, 0, W, H);
+          this.content(lc, proj, L, ltt, s);
+          const passes = chain.map(e => ({ type: e.type, vals: this.vals(e, ltt) }));
+          out.drawImage(this.fx.run(this.lc, target, passes, ltt, this.fxGeo(L, tt, s)), 0, 0);
+        }
+      } finally { ML.fxAdj = null; ML.fxCtx = null; }
       out.globalAlpha = 1; out.globalCompositeOperation = 'source-over';
     };
 
@@ -147,6 +153,7 @@ ML.Renderer = class {
       ctx.translate(g.x * s, g.y * s); ctx.rotate(g.rot);
       if (g.skx || g.sky) ctx.transform(1, Math.tan(g.sky), Math.tan(g.skx), 1, 0, 0);
       ctx.scale(g.sx * s, g.sy * s);
+      if (g.ax || g.ay) ctx.translate(-g.ax, -g.ay);
     }
     ctx.imageSmoothingQuality = 'medium';
     const sd = raw ? null : L.shadow;
@@ -156,15 +163,25 @@ ML.Renderer = class {
       ctx.shadowBlur = sd.b * s; ctx.shadowOffsetX = sd.x * s; ctx.shadowOffsetY = sd.y * s;
     }
     if (L.ph3) { const c = ML.photo3dCanvas(L, lt); if (c) ctx.drawImage(c, -L.bw / 2, -L.bh / 2, L.bw, L.bh); }
-    else if (L.type === 'image') { const im = ML.media.image(L); if (im) ctx.drawImage(im, -L.bw / 2, -L.bh / 2, L.bw, L.bh); }
+    else if (L.type === 'image') { const im = ML.media.image(L); if (im) { if (L.frame) { ctx.beginPath(); ctx.rect(-L.frame.w / 2, -L.frame.h / 2, L.frame.w, L.frame.h); ctx.clip(); } ctx.drawImage(im, -L.bw / 2, -L.bh / 2, L.bw, L.bh); } }
     else if (L.type === 'video') {
       const v = ML.media.el(L);
-      if (v && v.readyState >= 2 && v.videoWidth) ctx.drawImage(v, -L.bw / 2, -L.bh / 2, L.bw, L.bh);
+      if (v && v.readyState >= 2 && v.videoWidth) { if (L.frame) { ctx.beginPath(); ctx.rect(-L.frame.w / 2, -L.frame.h / 2, L.frame.w, L.frame.h); ctx.clip(); } ctx.drawImage(v, -L.bw / 2, -L.bh / 2, L.bw, L.bh); }
     } else if (L.type === 'text') { const c = ML.textCanvas(L); ctx.drawImage(c, -c.width / 2, -c.height / 2); }
     else if (L.glb) { const c = ML.glbCanvas(L, lt); if (c) ctx.drawImage(c, -L.bw / 2, -L.bh / 2, L.bw, L.bh); }
     else if (L.type === 'shape') {
       const sh = L.shape, p = shapePath(sh, L.bw, L.bh);
-      if (!sh.noFill) { ctx.fillStyle = sh.fill; ctx.fill(p); }
+      if (!sh.noFill) {
+        const fm = sh.fillMedia, it = fm && ML.media.items.get(fm.mediaId), im = it && it.img; let drawn = false;
+        if (im && (im.complete !== false) && (it.w || im.width)) { // isi bentuk dengan foto: dipotong mengikuti bentuk, bentuk tidak berubah
+          try {
+            const iw = it.w || im.width, ih = it.h || im.height, bw = Math.abs(L.bw) || 1, bh = Math.abs(L.bh) || 1, mode = fm.mode || 'fill';
+            let dw = bw, dh = bh; if (mode !== 'stretch') { const k = (mode === 'fit' ? Math.min : Math.max)(bw / iw, bh / ih); dw = iw * k; dh = ih * k; }
+            ctx.save(); ctx.clip(p); ctx.drawImage(im, -dw / 2 + (fm.ox || 0), -dh / 2 + (fm.oy || 0), dw, dh); ctx.restore(); drawn = true;
+          } catch (e) { try { ctx.restore(); } catch (x) { /* abaikan */ } }
+        }
+        if (!drawn) { ctx.fillStyle = sh.fill; ctx.fill(p); }
+      }
       if (sh.strokeW > 0) { ctx.lineWidth = sh.strokeW; ctx.strokeStyle = sh.strokeColor; ctx.lineJoin = 'round'; ctx.stroke(p); }
     }
     ctx.restore();

@@ -8,7 +8,7 @@ ML.sleep = sleep;
 
 /** .ml = ZIP berisi manifest.json, project.json (data edit/kodingan), media.json, thumb.jpg, media/* (foto, audio, video) */
 ML.buildML = async proj => {
-  const used = new Set(proj.layers.map(l => l.mediaId).filter(Boolean));
+  const used = new Set(proj.layers.map(l => l.mediaId).filter(Boolean)); proj.layers.forEach(l => { if (l.shape && l.shape.fillMedia && l.shape.fillMedia.mediaId) used.add(l.shape.fillMedia.mediaId); }); // termasuk foto isi bentuk
   const list = (await ML.db.mediaOf(proj.id)).filter(m => used.has(m.id));
   const meta = list.map(m => ({ id: m.id, kind: m.kind, name: m.name, mime: m.mime, w: m.w, h: m.h, dur: m.dur, file: 'media/' + m.id + '.' + (ML.ext(m.name) || 'bin') }));
   const entries = [

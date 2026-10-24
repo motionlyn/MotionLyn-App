@@ -32,7 +32,7 @@ ML.home = (() => {
 
   function render() {
     const importCard = h('div', { class: 'card imp' }, h('i', { html: I('import') }), h('div', { class: 'imp-t', text: 'Impor file .ml' }),
-      h('button', { class: 'btn soft', text: 'Impor', onclick: importML }), h('button', { class: 'btn soft', text: 'Dari link', onclick: () => ML.share.import() }), h('button', { class: 'btn soft', text: 'Dari Drive', onclick: () => ML.gdrive.import() }));
+      h('button', { class: 'btn soft', text: 'Impor', onclick: importML }), h('button', { class: 'btn soft', text: 'Impor XML (AM)', onclick: () => ML.amImportUi() }), h('button', { class: 'btn soft', text: 'Dari link', onclick: () => ML.share.import() }), h('button', { class: 'btn soft', text: 'Dari Drive', onclick: () => ML.gdrive.import() }));
     const page = h('div', { class: 'home' },
       h('header', { class: 'home-top' }, h('button', { class: 'icon-btn dark', html: I('menu'), title: 'Panduan & tentang', onclick: () => ML.guide() }),
         h('div', { class: 'brand' }, 'MotionLyn', h('sup', { text: 'beta' })), h('button', { class: 'icon-btn dark', title: 'AI Chat', 'aria-label': 'AI Chat', html: ML.icon('fx'), onclick: () => ML.aichat.open() }), h('button', { class: 'icon-btn dark', title: 'Download AIO', 'aria-label': 'Download AIO', html: I('import'), onclick: () => ML.aio.open() }), h('button', { class: 'icon-btn dark', title: 'Chat Global (beta)', 'aria-label': 'Chat Global (beta)', html: I('chat'), onclick: () => ML.chat.open() }), h('button', { class: 'icon-btn dark', html: I('gear'), title: 'Pengaturan', 'aria-label': 'Pengaturan', onclick: () => ML.settings.open() }), h('img', { class: 'avatar', onclick: () => ML.srcTap(), src: 'img/Icon.png' })),
@@ -91,6 +91,8 @@ ML.home = (() => {
         try { const blob = await ML.buildML(p); const loc = await ML.saveBlob(blob, ML.exportFileName(p, 'ml'), 'application/octet-stream'); ML.toast('Tersimpan: ' + loc, 4000); }
         catch (e) { ML.toast('Gagal ekspor: ' + e.message, 3500); }
       });
+      act('film', 'Editor Template (ganti foto/video/teks)', () => ML.tpl.open(p.id));
+      act('export', 'Ekspor XML (Alight Motion)', () => ML.amExportUi(p));
       act('export', 'Bagikan via link (maks 6 MB)', () => ML.share.export(p));
       act('export', 'Ekspor ke Google Drive', () => ML.gdrive.export(p));
       act('trash', 'Hapus', async () => { if (await ML.dialog({ title: 'Hapus proyek?', text: '“' + p.name + '” beserta medianya akan dihapus permanen.', ok: 'Hapus', danger: true })) { await ML.db.delProject(p.id); show(); } }, 'danger');

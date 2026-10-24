@@ -38,6 +38,7 @@ ML.exportScreen = A => {
   try { navigator.storage.estimate().then(e => { free.textContent = ((e.quota - e.usage) / 1e9).toFixed(1) + ' GB'; }); } catch (e) { free.textContent = '—'; }
   const sel = (opts, get, set) => h('select', { class: 'sel wide', onchange: e => { set(+e.target.value); size.textContent = est(); } }, ...opts.map(([v, l]) => h('option', { value: v, text: l, selected: get() === v })));
   const OPTS = [['video', 'video', 'Video MP4', () => dims().join('×') + ' • ' + FPS() + ' fps' + (st.alpha ? (st.alpha === 1 ? ' • WebM transparan + audio' : ' • WebM transparan tanpa audio') : '')], ['link', 'export', 'Bagikan via Link', () => 'Maks 6 MB'], ['pack', 'layers', 'Paket Proyek (.ml)', () => 'dengan media asli'], ['drive', 'export', 'Google Drive', () => 'Simpan ke Drive'],
+    ['xml', 'export', 'XML Alight Motion (.xml)', () => 'layer, efek & keyframe, sinkron mode AM'],
     ['png', 'image', 'Frame Saat Ini sebagai PNG', null], ['jpg', 'image', 'Frame Saat Ini sebagai JPG', null], ['seq', 'image', 'Urutan Gambar', () => 'PNG ' + FPS() + ' fps (ZIP)'], ['gif', 'image', 'GIF', () => 'animasi, maks 10 dtk']];
   const list = h('div'), draw = () => list.replaceChildren(...OPTS.map(([k, ic, t, sub]) => h('button', { class: 'opt' + (st.opt === k ? ' on' : ''), onclick: () => { st.opt = k; draw(); size.textContent = est(); } },
     h('span', { class: 'rd' }), h('span', { html: I(ic) }), h('span', { style: 'flex:1' }, h('b', { text: t }), sub ? h('small', { text: sub() }) : '')))); draw(); size.textContent = est();
@@ -66,11 +67,12 @@ ML.exportScreen = A => {
     finally { ML.exporting = false; P.seek(t0); sh.close(); }
   }
   async function go() {
-    const k = st.opt; if (!dur() && !['pack', 'drive', 'link'].includes(k)) { ML.toast('Proyek masih kosong'); return; }
+    const k = st.opt; if (!dur() && !['pack', 'drive', 'link', 'xml'].includes(k)) { ML.toast('Proyek masih kosong'); return; }
     if (k === 'video') { close(); A.exportVideo({ w: dims()[0], h: dims()[1], fps: FPS(), alpha: !!st.alpha, audio: st.alpha === 1 }); return; }
     await A.save(true);
     if (k === 'link') { close(); ML.share.export(proj); return; }
     if (k === 'drive') { close(); ML.gdrive.export(proj); return; }
+    if (k === 'xml') { close(); ML.amExportUi(proj); return; }
     try {
       if (k === 'pack') { ML.toast('Menyiapkan file .ml…'); await save(await ML.buildML(proj), 'ml', 'application/octet-stream'); }
       else if (k === 'png' || k === 'jpg') { const [w, hh] = dims(), cv = frame(P.t, w, hh, k === 'jpg'); await save(await blobOf(cv, k === 'png' ? 'image/png' : 'image/jpeg', .95), k, k === 'png' ? 'image/png' : 'image/jpeg'); }

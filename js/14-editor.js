@@ -390,7 +390,7 @@ ML.Editor = function (proj) {
       body.append(h('div', { class: 'add-grid' },
         o('video', 'Video', () => addMedia('video/*', 'video')), o('image', 'Foto', () => addMedia('image/*', 'image')), o('audio', 'Audio', () => addMedia('', 'audio')), o('mic', 'Rekam audio', () => ML.recorder(addRecorded)),
         o('text', 'Teks', addText), o('shape', 'Bentuk', shapeSheet), o('film', 'Latar warna', () => addShape('rect', true)),
-        o('copy', 'Salin latar (penyesuaian)', addAdjust), o('layers', 'Null object', () => addK3('null')), o('film', 'Kamera', () => addK3('camera')), o('image', 'Foto 3D (experimental)', addPhoto3d), o('layers', 'Model 3D (beta)', addGlb), o('film', 'Map 3D (beta)', () => addGlb(true)), o('layers', 'Model + Map 3D (experimental)', addCombo)));
+        o('copy', 'Salin latar (penyesuaian)', addAdjust), o('layers', 'Null object', () => addK3('null')), o('film', 'Kamera', () => addK3('camera')), o('image', 'Foto 3D (experimental)', addPhoto3d), o('layers', 'Model 3D (beta)', addGlb), o('film', 'Map 3D (beta)', () => addGlb(true)), o('layers', 'Model + Map 3D (experimental)', addCombo), ...(ML.editVer() === 'am' ? [o('image', 'Media contoh AM', sampleSheet)] : [])));
     });
   }
   /** Foto 3D (experimental): foto datar dijadikan relief 3D + kamera 3D bebas */
@@ -457,6 +457,19 @@ ML.Editor = function (proj) {
     pushLayer(L); ML.toast(kind === 'null' ? 'Null object dibuat. Sambungkan layer lain lewat Move & Transform → 3D' : 'Kamera dibuat. Aktifkan mode 3D di layer lain agar ikut kamera');
   }
   function pushLayer(L) { cp(); proj.layers.push(L); ST.sel = L.id; ST.kf = null; renderBar(); changed(true); }
+  /** media contoh (mode AM): foto dari folder am/samplemedia */
+  const SAMPLES = ['alps1', 'balloons1', 'cat2', 'city2', 'coffee1', 'jam1', 'kitten1', 'lake1', 'path1', 'road1', 'shore2', 'tulips1'];
+  function sampleSheet() {
+    ML.sheet('Media contoh AM', (body, close) => body.append(h('div', { class: 'add-grid' }, SAMPLES.map(n => h('button', { class: 'add-btn', style: 'background:url(am/samplemedia_thumbs/' + n + '.webp) center/cover;min-height:84px', title: n, onclick: async () => {
+      close();
+      try {
+        const r = await fetch('am/samplemedia/' + n + '.webp'); if (!r.ok) throw new Error('Folder am/ tidak ada (versi ML murni)');
+        const f = new File([await r.blob()], n + '.webp', { type: 'image/webp' }), it = await ML.media.importFile(proj, f, 'image');
+        const L = ML.makeLayer(proj, 'image', { name: n, mediaId: it.id, start: P.t, dur: 5, srcDur: it.dur });
+        [L.bw, L.bh] = ML.fitBox(it.w, it.h, proj); pushLayer(L);
+      } catch (e) { ML.toast(e.message, 3500); }
+    } })))));
+  }
   async function addMedia(accept, want) {
     const files = await ML.pickFiles(accept, true);
     for (const f of files) {
@@ -621,6 +634,6 @@ ML.Editor = function (proj) {
   const PN = ML.Panels(E);
 
   updHist(); layoutPv(); buildLanes(); renderBar(); draw();
-  return { exit, setUi, proj, state: ST, player: P, select, openPanel: PN.openPanel, panels: PN, addShape, addText };
+  return { E, exit, setUi, proj, state: ST, player: P, select, openPanel: PN.openPanel, panels: PN, addShape, addText };
 };
 

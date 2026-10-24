@@ -28,6 +28,36 @@ ML.newProject = o => {
 
 /* ---------- animasi (keyframe + kurva) ---------- */
 ML.A = v => ({ v, k: [] });
+/* easing bernama; "Nama@a" = sisa kurva setelah titik a (dipakai saat layer dipotong supaya kurva tetap nyambung) */
+ML.easeNamed = e => {
+  const m = /^(.*?)(?:@([\d.]+))?$/.exec(e), f = ML.EASE[m[1]]; if (!f) return u => u;
+  const a = m[2] ? +m[2] : 0; if (!a) return f;
+  const fa = f(a), den = 1 - fa; return w => Math.abs(den) < 1e-6 ? w : (f(a + w * (1 - a)) - fa) / den;
+};
+/** sisa easing sebuah segmen setelah fraksi waktu u0 (hasil berupa easing segmen baru) */
+ML.easeRest = (e, u0) => {
+  if (!e || u0 <= 1e-6) return e || null;
+  if (e === 'hold') return 'hold';
+  if (typeof e === 'string') {
+    const m = /^(.*?)(?:@([\d.]+))?$/.exec(e), a0 = m[2] ? +m[2] : 0; return m[1] + '@' + (a0 + u0 * (1 - a0)).toFixed(5);
+  }
+  const [x1, y1, x2, y2] = e, X = t => 3 * (1 - t) * (1 - t) * t * x1 + 3 * (1 - t) * t * t * x2 + t ** 3;
+  let lo = 0, hi = 1, s = u0; for (let i = 0; i < 40; i++) { s = (lo + hi) / 2; if (X(s) < u0) lo = s; else hi = s; }
+  const L = (p, q) => [p[0] + (q[0] - p[0]) * s, p[1] + (q[1] - p[1]) * s], P1 = [x1, y1], P2 = [x2, y2], P3 = [1, 1];
+  const Q0 = L([0, 0], P1), Q1 = L(P1, P2), Q2 = L(P2, P3), R0 = L(Q0, Q1), R1 = L(Q1, Q2), S = L(R0, R1);
+  const dx = 1 - S[0], dy = 1 - S[1]; if (dx < 1e-6 || Math.abs(dy) < 1e-6) return null;
+  const r = v => Math.round(v * 10000) / 10000;
+  return [r((R1[0] - S[0]) / dx), r((R1[1] - S[1]) / dy), r((Q2[0] - S[0]) / dx), r((Q2[1] - S[1]) / dy)];
+};
+/* easing bernama ala Alight Motion (mode AM): Sine/Quad/Cubic/Quart/Quint/Expo/Circ/Back/Elastic/Bounce */
+ML.EASE = (() => {
+  const E = {}, P = { Sine: t => 1 - Math.cos(t * Math.PI / 2), Quad: t => t * t, Cubic: t => t ** 3, Quart: t => t ** 4, Quint: t => t ** 5,
+    Expo: t => t ? 2 ** (10 * t - 10) : 0, Circ: t => 1 - Math.sqrt(1 - t * t), Back: t => 2.70158 * t ** 3 - 1.70158 * t * t,
+    Elastic: t => (t === 0 || t === 1) ? t : -(2 ** (10 * t - 10)) * Math.sin((t * 10 - 10.75) * (2 * Math.PI / 3)),
+    Bounce: t => { t = 1 - t; const n = 7.5625, d = 2.75; return 1 - (t < 1 / d ? n * t * t : t < 2 / d ? n * (t -= 1.5 / d) * t + .75 : t < 2.5 / d ? n * (t -= 2.25 / d) * t + .9375 : n * (t -= 2.625 / d) * t + .984375); } };
+  for (const k in P) { const f = P[k]; E[k + ' In'] = f; E[k + ' Out'] = t => 1 - f(1 - t); E[k + ' InOut'] = t => t < .5 ? f(t * 2) / 2 : 1 - f(2 - t * 2) / 2; }
+  return E;
+})();
 ML.evalAnim = (a, t) => {
   const k = a.k;
   if (!k || !k.length) return a.v;
@@ -36,10 +66,28 @@ ML.evalAnim = (a, t) => {
   if (t >= k[n].t) return k[n].v;
   let i = 0; while (k[i + 1].t < t) i++;
   const A = k[i], B = k[i + 1];
+  if (t >= B.t) return B.v;
   if (A.e === 'hold') return A.v;
   const u = (t - A.t) / (B.t - A.t);
-  const f = A.e ? ML.cubic(A.e[0], A.e[1], A.e[2], A.e[3])(u) : u;
+  /* mode AM: gerakan mulus antar keyframe (kecepatan nyambung, tanpa berhenti di tiap keyframe); segmen berkurva tetap memakai kurvanya */
+  if (!A.e && n >= 2 && typeof ML.editVer === 'function' && ML.editVer() === 'am') {
+    const hh = B.t - A.t, m0 = ML.kfTan(k, i), m1 = ML.kfTan(k, i + 1), u2 = u * u, u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * A.v + (u3 - 2 * u2 + u) * hh * m0 + (-2 * u3 + 3 * u2) * B.v + (u3 - u2) * hh * m1;
+  }
+  const f = typeof A.e === 'string' ? ML.easeNamed(A.e)(u) : A.e ? ML.cubic(A.e[0], A.e[1], A.e[2], A.e[3])(u) : u;
   return A.v + (B.v - A.v) * f;
+};
+/* tangen keyframe (PCHIP: monoton, tanpa overshoot); sisi yang berkurva/tahan dianggap satu sisi */
+ML.kfTan = (k, j) => {
+  if (k[j].m !== undefined && k[j].mv === k[j].v) return k[j].m;
+  const n = k.length - 1, d = q => (k[q + 1].v - k[q].v) / ((k[q + 1].t - k[q].t) || 1e-6);
+  const L = j > 0 && !k[j - 1].e ? d(j - 1) : null, R = j < n && !k[j].e ? d(j) : null;
+  if (L !== null && R !== null) {
+    if (L * R <= 0) return 0;
+    const h0 = k[j].t - k[j - 1].t, h1 = k[j + 1].t - k[j].t, w1 = 2 * h1 + h0, w2 = h1 + 2 * h0;
+    return (w1 + w2) / (w1 / L + w2 / R);
+  }
+  return L !== null ? L : R !== null ? R : 0;
 };
 ML.keyIndexAt = (a, t, eps) => a.k.findIndex(k => Math.abs(k.t - t) <= eps);
 ML.addKey = (a, t, v, e) => { a.k.push({ t, v, e: e || null }); a.k.sort((x, y) => x.t - y.t); };
@@ -88,9 +136,16 @@ ML.splitLayer = (proj, L, t) => {
   B.id = ML.uid(); B.start = t; B.dur = L.dur - off; B.trimIn = L.trimIn + off;
   const shift = a => {
     if (!a.k.length) return;
-    const v0 = ML.evalAnim(a, off);
-    const ks = a.k.map(k => ({ t: k.t - off, v: k.v, e: k.e })).filter(k => k.t > 1e-6);
-    ks.unshift({ t: 0, v: v0, e: null }); a.k = ks;
+    const k = a.k, v0 = ML.evalAnim(a, off); let i = -1; k.forEach((q, j) => { if (q.t <= off + 1e-6) i = j; });
+    let e = null, m;
+    if (i >= 0) {
+      const A = k[i], nx = k[i + 1], onKey = Math.abs(A.t - off) < 1e-6;
+      if (onKey) e = A.e; else if (nx) e = ML.easeRest(A.e, (off - A.t) / (nx.t - A.t));
+      if (nx && !e && typeof ML.editVer === 'function' && ML.editVer() === 'am') m = onKey ? ML.kfTan(k, i) : (ML.evalAnim(a, off + 1e-3) - ML.evalAnim(a, off - 1e-3)) / 2e-3;
+    }
+    const ks = k.map(q => ({ t: q.t - off, v: q.v, e: q.e })).filter(q => q.t > 1e-6), first = { t: 0, v: v0, e };
+    if (m !== undefined && isFinite(m)) { first.m = m; first.mv = v0; }
+    ks.unshift(first); a.k = ks;
   };
   Object.values(B.p).forEach(shift);
   B.fx.forEach(e => { e.id = ML.uid(); Object.values(e.p).forEach(shift); });
@@ -112,7 +167,7 @@ ML.restore = (proj, s) => { const o = JSON.parse(s); proj.layers = o.layers; pro
 
 /** proyek lama belum punya skew/bayangan: lengkapi supaya aman */
 ML.ensureLayer = L => {
-  ['skx', 'sky'].forEach(k => { if (!L.p[k]) L.p[k] = ML.A(0); });
+  ['skx', 'sky', 'ax', 'ay'].forEach(k => { if (!L.p[k]) L.p[k] = ML.A(0); });
   if (!L.shadow) L.shadow = { on: false, c: '#000000', a: 60, b: 14, x: 6, y: 8 };
   if (L.tag === undefined) L.tag = null;
   return L;
@@ -153,11 +208,11 @@ ML.resizeProject = (proj, nw, nh) => {
 ML.geom = (L, t) => {
   const lt = t - L.start, v = k => ML.evalAnim(L.p[k], lt), d = Math.PI / 180;
   return { x: v('x'), y: v('y'), sx: v('sx') / 100, sy: v('sy') / 100, rot: v('rot') * d, w: L.bw, h: L.bh, op: v('op') / 100,
-    skx: L.p.skx ? v('skx') * d : 0, sky: L.p.sky ? v('sky') * d : 0 };
+    skx: L.p.skx ? v('skx') * d : 0, sky: L.p.sky ? v('sky') * d : 0, ax: L.p.ax ? v('ax') : 0, ay: L.p.ay ? v('ay') : 0 };
 };
 ML.hit = (L, t, px, py) => {
   const g = ML.geom(L, t), dx = px - g.x, dy = py - g.y, c = Math.cos(g.rot), s = Math.sin(g.rot);
-  const lx = dx * c + dy * s, ly = -dx * s + dy * c;
+  const lx = dx * c + dy * s + (g.ax || 0) * g.sx, ly = -dx * s + dy * c + (g.ay || 0) * g.sy;
   return Math.abs(lx) <= Math.abs(g.w * g.sx) / 2 && Math.abs(ly) <= Math.abs(g.h * g.sy) / 2;
 };
 })();

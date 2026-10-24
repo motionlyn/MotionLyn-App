@@ -170,11 +170,10 @@ ML.gdrive = (() => {
     const ta = h('textarea', { readonly: true, spellcheck: false, style: 'flex:1;width:100%;box-sizing:border-box;background:#10081a;color:#ffd6ef;border:0;border-radius:10px;padding:10px;font:12px/1.4 monospace;white-space:pre;overflow:auto;resize:none;-webkit-user-select:text;user-select:text' });
     ta.value = src;
     let ov; const bk = () => { ov.remove(); ML.popBack(bk); return true; }; ML.pushBack(bk);
-    const dk = h('button', { class: 'btn soft', style: 'margin:0;padding:8px 14px', text: 'Desktop: ' + (ML.uiMode() === 'desk' ? 'ON' : 'OFF'), onclick: () => { ML.setUi(ML.uiMode() === 'desk' ? 'mobile' : 'desk'); dk.textContent = 'Desktop: ' + (ML.uiMode() === 'desk' ? 'ON' : 'OFF'); } });
     ov = h('div', { style: 'position:fixed;inset:0;z-index:10000;background:#170c1e;color:#e6e8f6;display:flex;flex-direction:column;gap:8px;padding:calc(env(safe-area-inset-top,0px) + 10px) 10px 12px' },
       h('div', { style: 'display:flex;align-items:center;gap:8px' }, h('div', { style: 'flex:1;font-weight:700', text: 'Kode HTML MotionLyn · ' + (src.length / 1024).toFixed(0) + ' KB' }),
         h('button', { class: 'btn soft', style: 'margin:0;padding:8px 14px', text: 'Salin semua', onclick: async () => { try { await navigator.clipboard.writeText(src); ML.toast('Kode disalin'); } catch (e) { ta.focus(); ta.select(); ML.toast('Tekan lama untuk salin'); } } }),
-        dk, h('button', { class: 'btn soft', style: 'margin:0;padding:8px 14px', text: 'Tutup', onclick: bk })), ta);
+        h('button', { class: 'btn soft', style: 'margin:0;padding:8px 14px', text: 'Tutup', onclick: bk })), ta);
     document.body.append(ov);
   };
 })();

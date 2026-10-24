@@ -173,7 +173,7 @@ ML.Panels = function (E) {
     const pad = 20, dpr = window.devicePixelRatio || 1;
     const c = h('canvas', { class: 'bz', width: S * dpr, height: S * dpr, style: { width: S + 'px', height: S + 'px' } });
     const X = x => pad + x * (S - 2 * pad), Y = y => S - pad - (y + 0.5) / 2 * (S - 2 * pad);
-    const cur = () => Array.isArray(k.e) ? k.e : [0, 0, 1, 1];
+    const cur = () => Array.isArray(k.e) ? k.e : [0, 0, 1, 1], named = () => typeof k.e === 'string' && k.e !== 'hold';
     function redraw() {
       const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, S, S);
       g.strokeStyle = '#33385a'; g.lineWidth = 1; g.strokeRect(X(0), Y(1), X(1) - X(0), Y(0) - Y(1));
@@ -181,16 +181,17 @@ ML.Panels = function (E) {
       const e = cur();
       g.strokeStyle = '#ff3fb0'; g.lineWidth = 3; g.beginPath();
       if (k.e === 'hold') { g.moveTo(X(0), Y(0)); g.lineTo(X(1), Y(0)); g.lineTo(X(1), Y(1)); }
+      else if (named()) { const f = ML.easeNamed(k.e); for (let i = 0; i <= 80; i++) { const u = i / 80; g[i ? 'lineTo' : 'moveTo'](X(u), Y(f(u))); } }
       else { const f = ML.cubic(e[0], e[1], e[2], e[3]); for (let i = 0; i <= 60; i++) { const u = i / 60; g[i ? 'lineTo' : 'moveTo'](X(u), Y(f(u))); } }
       g.stroke();
-      if (k.e !== 'hold') {
+      if (k.e !== 'hold' && !named()) {
         g.strokeStyle = '#b896bf'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(e[0]), Y(e[1])); g.moveTo(X(1), Y(1)); g.lineTo(X(e[2]), Y(e[3])); g.stroke();
         g.fillStyle = '#fff'; [[e[0], e[1]], [e[2], e[3]]].forEach(([x, y]) => { g.beginPath(); g.arc(X(x), Y(y), 8, 0, 7); g.fill(); });
       }
     }
     let hd = -1;
     c.addEventListener('pointerdown', ev => {
-      if (k.e === 'hold') return; c.setPointerCapture(ev.pointerId);
+      if (k.e === 'hold' || named()) return; c.setPointerCapture(ev.pointerId);
       const r = c.getBoundingClientRect(), px = ev.clientX - r.left, py = ev.clientY - r.top, e = cur();
       const d0 = Math.hypot(px - X(e[0]), py - Y(e[1])), d1 = Math.hypot(px - X(e[2]), py - Y(e[3]));
       hd = Math.min(d0, d1) < 30 ? (d0 <= d1 ? 0 : 1) : -1;
@@ -217,13 +218,31 @@ ML.Panels = function (E) {
     const kp = { get e() { return ref.e; }, set e(v) { segs.forEach(s => { s.a.k[s.i].e = Array.isArray(v) ? v.slice() : v; }); } };
     const pre = h('div', { class: 'kfpre' });
     const curve = curveEditor(kp, () => { E.cp('curve'); E.changed(); }, () => drawPre());
+    /* presisi kurva: geser titik kontrol per 0,01 (tombol − / +, slider, atau ketik angka) */
+    const prec = h('div', { class: 'kfprec', style: 'margin-top:8px' });
+    const PL = ['Titik 1 · X', 'Titik 1 · Y', 'Titik 2 · X', 'Titik 2 · Y'], pin = [];
+    const isBz = () => ref.e == null || Array.isArray(ref.e), curE = () => (Array.isArray(ref.e) ? ref.e : [0, 0, 1, 1]).slice();
+    const setC = (i, v) => { if (!isBz() || !isFinite(v)) return; const c = curE(); c[i] = Math.round(clamp(v, i % 2 ? -0.5 : 0, i % 2 ? 1.5 : 1) * 100) / 100; E.cp('crvp' + i); kp.e = c; curve.redraw(); E.changed(); drawPre(); };
+    PL.forEach((lb, i) => {
+      const mn = i % 2 ? -0.5 : 0, mx = i % 2 ? 1.5 : 1, sb = h('button', { class: 'btn soft', style: 'width:34px;min-width:34px;margin:0;padding:0', text: '−', onclick: () => setC(i, curE()[i] - 0.01) }), pb = h('button', { class: 'btn soft', style: 'width:34px;min-width:34px;margin:0;padding:0', text: '+', onclick: () => setC(i, curE()[i] + 0.01) });
+      const sl = h('input', { class: 'sld', type: 'range', min: mn, max: mx, step: 0.01, style: 'flex:1;min-width:0' }), nu = h('input', { class: 'txt num', type: 'number', step: 0.01, style: 'width:62px' });
+      sl.addEventListener('input', () => setC(i, +sl.value)); nu.addEventListener('input', () => setC(i, parseFloat(nu.value)));
+      pin.push({ sl, nu, sb, pb }); prec.append(h('div', { class: 'prow', style: 'gap:6px;align-items:center' }, h('span', { class: 'plab', style: 'min-width:74px;font-size:12px', text: lb }), sb, sl, pb, nu));
+    });
+    const precNote = h('p', { class: 'dlg-text', style: 'margin:4px 0 0;font-size:12px;opacity:.7', text: 'Pilih preset bezier (mis. Linear) untuk menggeser kurva.' }); prec.append(precNote);
+    function syncPrec() {
+      const ok = isBz(), e = curE(); precNote.hidden = ok;
+      pin.forEach((o, i) => { o.sl.value = e[i]; if (document.activeElement !== o.nu) o.nu.value = e[i].toFixed(2); [o.sl, o.nu, o.sb, o.pb].forEach(x => { x.disabled = !ok; }); });
+    }
     function drawPre() {
       pre.replaceChildren(...PRE_CURVE.map(([n, e]) => h('button', { class: 'chip' + (Array.isArray(ref.e) ? (ref.e.every((v, j) => Math.abs(v - e[j]) < 1e-3) ? ' on' : '') : (!ref.e && n === 'Linear' ? ' on' : '')), text: n, onclick: () => { E.cp(); kp.e = n === 'Linear' ? null : e.slice(); curve.redraw(); E.changed(); drawPre(); } })),
-        h('button', { class: 'chip' + (ref.e === 'hold' ? ' on' : ''), text: 'Tahan', onclick: () => { E.cp(); kp.e = 'hold'; curve.redraw(); E.changed(); drawPre(); } }));
+        h('button', { class: 'chip' + (ref.e === 'hold' ? ' on' : ''), text: 'Tahan', onclick: () => { E.cp(); kp.e = 'hold'; curve.redraw(); E.changed(); drawPre(); } }),
+        ...(ML.editVer() === 'am' ? Object.keys(ML.EASE).map(n => h('button', { class: 'chip' + (ref.e === n ? ' on' : ''), text: n, onclick: () => { E.cp(); kp.e = n; curve.redraw(); E.changed(); drawPre(); } })) : []));
+      syncPrec();
     }
     drawPre();
     main.append(h('div', { class: 'kfedit' }, curve.el, h('div', { class: 'kfside' },
-      h('div', { class: 'psec', text: 'Kurva ' + ML.fmt(L.start + ref.t, proj.fps) + ' → ' + ML.fmt(L.start + next.t, proj.fps) + (segs.length > 1 ? ' (' + segs.length + ' parameter)' : '') }), pre, back)));
+      h('div', { class: 'psec', text: 'Kurva ' + ML.fmt(L.start + ref.t, proj.fps) + ' → ' + ML.fmt(L.start + next.t, proj.fps) + (segs.length > 1 ? ' (' + segs.length + ' parameter)' : '') }), pre, prec, back)));
   }
 
   /* ================= kerangka panel (rail + isi) ================= */
@@ -258,8 +277,8 @@ ML.Panels = function (E) {
   const BUILD = {
     xform(L) {
       const m = ST.panel.mode;
-      const spec = { move: [['x', 'X'], ['y', 'Y']], rot: [['rot', 'Derajat']], scale: [['sx', 'Lebar %'], ['sy', 'Tinggi %']], skew: [['skx', 'Miring X°'], ['sky', 'Miring Y°']], z: [['z', 'Z']] }[m];
-      const modes = [['move', 'move', 'Geser'], ['rot', 'rotate', 'Putar'], ['scale', 'scale', 'Skala'], ['skew', 'skew', 'Miring'], ['z', 'layers', '3D / Z']];
+      const spec = { move: [['x', 'X'], ['y', 'Y']], rot: [['rot', 'Derajat']], scale: [['sx', 'Lebar %'], ['sy', 'Tinggi %']], skew: [['skx', 'Miring X°'], ['sky', 'Miring Y°']], anchor: [['ax', 'Jangkar X'], ['ay', 'Jangkar Y']], z: [['z', 'Z']] }[m];
+      const modes = [['move', 'move', 'Geser'], ['rot', 'rotate', 'Putar'], ['scale', 'scale', 'Skala'], ['skew', 'skew', 'Miring']].concat(ML.editVer() === 'am' ? [['anchor', 'plus', 'Titik jangkar']] : [], [['z', 'layers', '3D / Z']]);
       const right = h('div', { class: 'mrail' }, modes.map(([k, ic, t]) => h('button', { class: 'mbtn' + (m === k ? ' on' : ''), title: t, 'aria-label': t, html: I(ic), onclick: () => { ST.panel.mode = k; ST.panel.curve = false; rebuild(); } })));
       frame(L, () => spec.map(([k]) => L.p[k]).concat(m === 'z' && L.glb ? ['rx', 'ry', 'rz', 'ms', 'spin', 'la', 'amb', 'rf', 'ff', 'fy', 'fd', 'li', 'le', 'lw', 'rim', 'spc', 'ex'].concat(L.glb.map ? ['cx', 'cy', 'cz', 'yaw', 'pitch', 'fov'] : []).concat(L.glb.mod ? ['m_x', 'm_y', 'm_z', 'm_rx', 'm_ry', 'm_rz', 'm_ms', 'm_spin'] : []).concat(Object.keys(L.p).filter(k => /^(m_)?b\d+(x|y|z|px|py|pz|s)$/.test(k))).map(k => L.p[k]) : []), main => {
         const boxes = h('div', { class: 'nboxes' });
@@ -281,7 +300,7 @@ ML.Panels = function (E) {
             h('div', { class: 'psec', text: 'Sambung ke Null / layer lain (ikut gerakannya)' }),
             toggleChips([['', 'Tidak ada']].concat(lays.map(x => [x.id, x.name])), () => L.parent || '', v => { L.parent = v || null; }),
             ...(L.ph3 ? [h('div', { class: 'psec', text: 'Foto 3D (experimental): mode kedalaman' }), toggleChips([[0, 'Datar'], [1, 'Terang = dekat'], [2, 'Gelap = dekat']], () => L.ph3.mode | 0, v => { L.ph3.mode = v; }), h('div', { class: 'psec', text: 'Posisi & putar foto' })].concat(ML.PH3A.map(([k, lab, mn, mx, u, st]) => paramRow(L, L.p[k], { min: mn, max: mx, step: st, unit: u }, lab, 'p3' + k + L.id)), [h('div', { class: 'psec', text: 'Kamera 3D' })], ML.PH3C.map(([k, lab, mn, mx, u, st]) => paramRow(L, L.p[k], { min: mn, max: mx, step: st, unit: u }, lab, 'p3' + k + L.id))) : []), ...(L.glb ? [h('div', { class: 'psec', text: 'Model 3D (beta)' })].concat([['rx', 'Rotasi X', -360, 360, '°'], ['ry', 'Rotasi Y', -360, 360, '°'], ['rz', 'Rotasi Z', -360, 360, '°'], ['ms', 'Skala model', 5, 300, '%'], ['spin', 'Auto-putar Y', -360, 360, '°/dtk'], ['la', 'Sudut cahaya', -180, 180, '°'], ['amb', 'Cahaya sekitar', 0, 100, '%']].map(([k, lab, mn, mx, u]) => paramRow(L, L.p[k], { min: mn, max: mx, step: 1, unit: u }, lab, 'pg' + k + L.id))) : []), ...(L.glb ? glbMenu(L) : []));
-        } else main.append(boxes, pad(L, m, spec));
+        } else main.append(boxes, pad(L, m, spec), ...(ML.editVer() === 'am' && m === 'scale' ? [h('div', { class: 'prow' }, h('span', { class: 'plab', text: 'Balik' }), h('div', { class: 'grp' }, ...[['sx', 'Horizontal'], ['sy', 'Vertikal']].map(([k, n]) => h('button', { class: 'btn soft', style: 'width:auto;margin:0 6px 0 0;padding:0 12px', text: n, onclick: () => { E.cp(); const a = L.p[k]; a.v = -a.v; a.k.forEach(q => { q.v = -q.v; }); E.changed(true); rebuild(); } }))))] : []));
       }, right);
     },
     blend(L) {
@@ -295,6 +314,15 @@ ML.Panels = function (E) {
           const s = L.shape;
           main.append(sec('Warna isi'), inlineColor(() => s.fill, c => { s.fill = c; s.noFill = false; }),
             toggleChips([[false, 'Berisi'], [true, 'Tanpa isi (outline)']], () => !!s.noFill, v => { s.noFill = v; if (v && s.strokeW < 4) s.strokeW = 6; if (v) s.strokeColor = s.strokeColor || s.fill; }));
+          // isi bentuk dengan foto: bentuk tetap, fotonya dipotong mengikuti bentuk
+          const fm = s.fillMedia, fit = fm && ML.media.items.get(fm.mediaId);
+          const setFm = it2 => { if (it2.kind !== 'image') { ML.toast('Pilih foto (bukan video/audio)'); return; } E.cp(); s.fillMedia = { mediaId: it2.id, mode: (s.fillMedia && s.fillMedia.mode) || 'fill' }; s.noFill = false; E.changed(true); if (ST.panel) rebuild(); ML.toast('Bentuk diisi foto'); };
+          const fromDevice = async () => { if (!E.guard(L)) return; const fs = await ML.pickFiles('image/*', false); if (!fs[0]) return; try { setFm(await ML.media.importFile(proj, fs[0])); } catch (e) { ML.toast(e.message, 3500); } };
+          const fromProject = () => { const its = [...ML.media.items.values()].filter(q => q.kind === 'image'); ML.sheet('Foto di proyek ini', (body, close) => { if (!its.length) { body.append(h('p', { class: 'empty', text: 'Belum ada foto di proyek ini. Pilih dari perangkat.' })); return; } const grid = h('div', { class: 'mgrid' }); its.forEach(q => { const th = h('div', { class: 'mth' }); th.style.backgroundImage = 'url(' + q.url + ')'; grid.append(h('button', { class: 'mitem', onclick: () => { close(); setFm(q); } }, th, h('span', { text: q.name }))); }); body.append(grid); }); };
+          main.append(sec('Isi dengan foto'), h('div', { class: 'minfo' }, h('b', { text: fm ? (fit ? fit.name : '(foto hilang)') : 'Belum ada foto: bentuk berisi warna' }), h('small', { text: 'Bentuk tidak berubah, foto dipotong mengikuti bentuk' })),
+            h('div', { class: 'btn-row left' }, h('button', { class: 'btn soft', html: I('import') + '<span>Dari perangkat</span>', onclick: fromDevice }), h('button', { class: 'btn soft', html: I('film') + '<span>Dari media proyek</span>', onclick: fromProject })),
+            fm ? toggleChips([['fill', 'Isi (potong)'], ['fit', 'Pas'], ['stretch', 'Regangkan']], () => s.fillMedia.mode || 'fill', v => { s.fillMedia.mode = v; }) : null,
+            fm ? h('button', { class: 'btn soft', text: 'Hapus foto (kembali ke warna)', onclick: () => { E.cp(); delete s.fillMedia; E.changed(true); if (ST.panel) rebuild(); } }) : null);
         } else if (L.type === 'text') {
           const t = L.text;
           main.append(sec('Warna teks'), inlineColor(() => t.color, c => { t.color = c; t.noFill = false; }),
@@ -331,7 +359,7 @@ ML.Panels = function (E) {
           const s = L.shape;
           main.append(h('div', { class: 'prow' }, h('span', { class: 'plab', text: 'Jenis' }), toggleChips([['rect', 'Persegi'], ['ellipse', 'Lingkaran'], ['triangle', 'Segitiga'], ['star', 'Bintang']], () => s.kind, v => { s.kind = v; })),
             plain('Lebar', () => L.bw, v => { L.bw = Math.max(1, v); }, 1, proj.w * 2), plain('Tinggi', () => L.bh, v => { L.bh = Math.max(1, v); }, 1, proj.h * 2),
-            plain('Sudut bulat', () => s.radius, v => { s.radius = Math.max(0, v); }, 0, Math.round(Math.min(L.bw, L.bh) / 2)));
+            plain('Sudut bulat', () => s.radius, v => { s.radius = Math.max(0, v); }, 0, Math.round(Math.min(L.bw, L.bh) / 2)), ...(ML.amShapeRows(L, plain, h, rebuild) || []));
         }
       });
     },
@@ -371,7 +399,7 @@ ML.Panels = function (E) {
 
   /** area geser (touchpad) untuk memindahkan / memutar / menskala / memiringkan layer */
   function pad(L, m, spec) {
-    const txt = { move: 'Geser ke sini untuk memindahkan layer', rot: 'Geser kiri/kanan untuk memutar layer', scale: 'Geser kiri/kanan untuk mengubah skala', skew: 'Geser untuk memiringkan layer' }[m];
+    const txt = { move: 'Geser ke sini untuk memindahkan layer', rot: 'Geser kiri/kanan untuk memutar layer', scale: 'Geser kiri/kanan untuk mengubah skala', skew: 'Geser untuk memiringkan layer', anchor: 'Geser untuk memindahkan titik jangkar (pivot putar & skala)' }[m];
     const el = h('div', { class: 'pad' }, h('span', { text: txt }));
     let st = null;
     el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); st = { x: e.clientX, y: e.clientY, b: spec.map(([k]) => ML.evalAnim(L.p[k], ltOf(L))) }; });
@@ -381,6 +409,7 @@ ML.Panels = function (E) {
       if (m === 'move') vals = [st.b[0] + dx * kx, st.b[1] + dy * kx];
       else if (m === 'rot') vals = [st.b[0] + dx * 0.5];
       else if (m === 'scale') { const f = Math.exp(dx * 0.006); vals = ST.link ? [st.b[0] * f, st.b[1] * f] : [st.b[0] * f, st.b[1] * Math.exp(-dy * 0.006)]; }
+      else if (m === 'anchor') vals = [st.b[0] + dx * kx, st.b[1] + dy * kx];
       else vals = [st.b[0] + dx * 0.25, st.b[1] + dy * 0.25];
       E.cp('pad' + m + L.id); let ins = false;
       spec.forEach(([k], i) => { if (ML.setAnim(L.p[k], ltOf(L), vals[i], E.eps())) ins = true; });
@@ -498,6 +527,7 @@ ML.Panels = function (E) {
     if (vis) items.push(['Balik secara Horizontal', () => flip(L, 'sx')], ['Balik secara Vertikal', () => flip(L, 'sy')]);
     if (fittable) items.push(['Sesuaikan Area Komposisi', () => fitNow(L, 'fit')], ['Isi Area Komposisi', () => fitNow(L, 'fill')], ['Regangkan ke Area Komposisi', () => fitNow(L, 'stretch')]);
     if (isMedia(L)) items.push(['Ganti Media', () => replaceSheet(L)]);
+    if (L.type === 'shape') items.push(['Isi dengan Foto', () => openPanel('color')]);
     if (L.type === 'shape' || L.type === 'text') items.push([(L.shape || L.text).noFill ? 'Kembalikan Isi' : 'Ubah ke Outline', () => toOutline(L)]);
     if (L.type === 'video' || L.type === 'audio') items.push(['Volume', () => openPanel('volume')]);
     if (isMedia(L)) items.push(['Info Media', () => mediaInfo(L)]);
@@ -520,6 +550,10 @@ ML.Panels = function (E) {
   /* ================= Browser Efek ================= */
   const CATS = [['Blur', ['motionblur', 'lensblur', 'streaks'], '#2b4a7a,#1d2b4d'], ['Distorsi/Warp', ['wave', 'mirror', 'mirror2', 'squeeze', 'randdisp', 'randdispv2', 'wavev2', 'pagecurl'], '#1d6a7a,#14334a'], ['Move/Transform', ['oscillate', 'swing', 'swingv2', 'spin', 'offset', 'transform', 'flip3'], '#3d3a7a,#1b1d3d'],
     ['Ulangi', ['tiles', 'tiles2', 'tiles3'], '#7a2e6a,#2e1540'], ['Matte/Mask/Key', ['lumakey', 'lumakeyv2', 'chroma', 'chromav2', 'chromakeyadv', 'wipe2'], '#6a4a2a,#2a1d14'], ['Warna', ['solidcolor', 'gradoverlay', 'expgamma', 'exposurev2'], '#7a3a2a,#3a1520'], ['Lainnya', ['copybg', 'cchd', 'blink'], '#3a4a5a,#161d28']];
+  ML.FX_CATS = CATS;
+  ML.xmlOn = () => ML.editVer() === 'am';
+  ML.setXmlOn = v => { ML.lsSet('ml.xmlfx', v ? '1' : '0'); ML.fxThumbCache = null; };
+  const fxShown = t => ML.xmlOn() || !ML.FXDEF[t].xml;
   ML.FX_SAMPLES = Array.from({ length: 12 }, (_, i) => 'img/sample' + (i + 1) + '.png');
   async function fxThumbs() {
     if (ML.fxThumbCache) return ML.fxThumbCache;
@@ -530,8 +564,10 @@ ML.Panels = function (E) {
       if (fx.ok && imgs.length) {
         const srcs = imgs.map(im => { const c = document.createElement('canvas'); c.width = c.height = S; const q = Math.min(im.width, im.height); c.getContext('2d').drawImage(im, (im.width - q) / 2, (im.height - q) / 2, q, q, 0, 0, S, S); return c; });
         for (const [n, t] of ML.FX_ORDER.entries()) {
+          if (!fxShown(t)) continue;
           const src = srcs[n % srcs.length];
-          const d = ML.FXDEF[t], c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
+          const d = ML.FXDEF[t]; if (d.thumbFile) { out[t] = 'effects/thumb/' + d.thumbFile; continue; }
+          const c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
           if (d.special) { g.globalAlpha = 0.28; for (let i = -2; i <= 2; i++) g.drawImage(src, i * 4, 0, S, S); }
           else { const vals = {}; d.params.forEach(p => { vals[p.k] = (d.thumb && p.k in d.thumb) ? d.thumb[p.k] : p.def; }); g.drawImage(fx.run(src, src, [{ type: t, vals }], 0.3), 0, 0); }
           out[t] = c.toDataURL('image/jpeg', 0.7);
@@ -577,11 +613,11 @@ ML.Panels = function (E) {
         body.replaceChildren();
         const row = t => h('button', { class: 'ebrow', onclick: () => pick(t) }, th(t), h('div', {}, h('b', { text: ML.FXDEF[t].name }), h('small', { text: ML.FXDEF[t].params.length + ' parameter' })));
         if (searching || cat !== null) {
-          const list = (searching ? ML.FX_ORDER.filter(t => ML.FXDEF[t].name.toLowerCase().includes(q.trim().toLowerCase())) : CATS[cat][1]);
+          const list = (searching ? ML.FX_ORDER.filter(t => fxShown(t) && ML.FXDEF[t].name.toLowerCase().includes(q.trim().toLowerCase())) : CATS[cat][1]);
           body.append(...(list.length ? list.map(row) : [h('p', { class: 'empty', text: 'Efek tidak ditemukan.' })]));
         } else {
-          body.append(h('div', { class: 'eb-feat' }, ML.FX_ORDER.map(t => h('button', { class: 'ebf', onclick: () => pick(t) }, th(t), h('span', { text: ML.FXDEF[t].name.split(' (')[0] })))),
-            h('div', { class: 'eb-cats' }, CATS.map(([n, , g], i) => h('button', { class: 'ebc', style: { background: 'linear-gradient(135deg,' + g + ')' }, text: n, onclick: () => { cat = i; draw(); } }))));
+          body.append(h('div', { class: 'eb-feat' }, ML.FX_ORDER.filter(t => !ML.FXDEF[t].xml).map(t => h('button', { class: 'ebf', onclick: () => pick(t) }, th(t), h('span', { text: ML.FXDEF[t].name.split(' (')[0] })))),
+            h('div', { class: 'eb-cats' }, CATS.map(([n, l, g], i) => [n, l, g, i]).filter(c => ML.xmlOn() || !String(c[0]).startsWith('XML · ')).map(([n, , g, i]) => h('button', { class: 'ebc', style: { background: 'linear-gradient(135deg,' + g + ')' }, text: n, onclick: () => { cat = i; draw(); } }))));
         }
       }
     }
@@ -603,7 +639,7 @@ ML.Panels = function (E) {
       top.append(ib('back', 'Batal pilih layer', () => E.select(null)), nm, ib('copy', 'Duplikat layer', E.dupSel), ib('trash', 'Hapus layer', E.delSel), ib('more', 'Menu layer', layerMenu));
       return;
     }
-    top.append(ib('back', 'Kembali', E.exit), E.nameIn, ib('gear', 'Pengaturan', E.settingsSheet), ib('export', 'Ekspor', E.exportSheet));
+    top.append(ib('back', 'Kembali', E.exit), E.nameIn, ib('film', 'Editor Template (ganti foto/video/teks)', () => ML.tpl && ML.tpl.openEd(E)), ib('gear', 'Pengaturan', E.settingsSheet), ib('export', 'Ekspor', E.exportSheet));
   }
   function renderTools() {
     const L = E.sel(), host = E.tools; host.replaceChildren();

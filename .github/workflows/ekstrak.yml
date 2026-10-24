@@ -1,0 +1,18 @@
+name: Ekstrak zip
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  ekstrak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          unzip -o MotionLyn-App_kode.zip
+          unzip -o MotionLyn-App_aset.zip
+          rm MotionLyn-App_kode.zip MotionLyn-App_aset.zip
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Update v3.76: hapus mode desktop, tambah aset"
+          git push

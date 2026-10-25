@@ -28,24 +28,24 @@ jobs:
           A=android/app/src/main/assets
           mkdir -p $A
           cp index.html $A/
-          cp -r css js img $A/
+          cp -r css js img am effects $A/
 
       - name: Build APK
         working-directory: android
         run: gradle assembleRelease --no-daemon
 
       - name: Ganti nama APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk MotionLyn-0.1.5-beta.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk MotionLyn-0.2.5-beta.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: MotionLyn-APK
-          path: MotionLyn-0.1.5-beta.apk
+          path: MotionLyn-0.2.5-beta.apk
 
       - name: Publikasikan ke Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.5-beta
-          name: MotionLyn 0.1.5 beta
+          tag_name: v0.2.5-beta
+          name: MotionLyn 0.2.5 beta
           prerelease: true
-          files: MotionLyn-0.1.5-beta.apk
+          files: MotionLyn-0.2.5-beta.apk

@@ -1,5 +1,5 @@
 'use strict';
-window.ML = { VERSION: '0.0.5', LABEL: '0.0.5 beta test · build 3.76' };
+window.ML = { VERSION: '0.2.5', LABEL: '0.2.5 beta · build 3.77' };
 (function () {
 const memLS = {};
 /* localStorage bisa melempar error (iframe/sandbox); jatuh ke memori bila tak tersedia */

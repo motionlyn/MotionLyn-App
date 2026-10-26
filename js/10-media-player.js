@@ -166,10 +166,12 @@ ML.media = {
     if (it.peaksP) return it.peaksP;
     return (it.peaksP = (async () => {
       try {
-        const AC = window.AudioContext || window.webkitAudioContext, c = new AC();
+        /* v3.90: decode di 8 kHz (cukup untuk gambar gelombang) -> memori & waktu jauh lebih kecil; mulai saat browser idle agar UI tidak tersendat */
+        await new Promise(r => (window.requestIdleCallback ? requestIdleCallback(r, { timeout: 400 }) : setTimeout(r, 30)));
+        const AC = window.AudioContext || window.webkitAudioContext; let c; try { c = new AC({ sampleRate: 8000 }); } catch (x) { c = new AC(); }
         const buf = await c.decodeAudioData(await it.blob.arrayBuffer()); c.close();
         const d = buf.getChannelData(0), N = 800, step = Math.max(1, Math.floor(d.length / N)), out = new Float32Array(N);
-        for (let i = 0; i < N; i++) { let m = 0; for (let j = i * step, e = Math.min(d.length, j + step); j < e; j += 4) m = Math.max(m, Math.abs(d[j])); out[i] = m; }
+        for (let i = 0; i < N; i++) { let m = 0; for (let j = i * step, e = Math.min(d.length, j + step); j < e; j += 2) m = Math.max(m, Math.abs(d[j])); out[i] = m; }
         it.peaks = out; return out;
       } catch (e) { return null; }
     })());

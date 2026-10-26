@@ -147,6 +147,7 @@ function off(quiet) {
 const hyper = ML.hyper = {
   on, off, enabled: () => S.on, toggle: () => S.on ? (off(), false) : (on(), true),
   task, keep, cache, minBattery: 12,
+  batteryExempt: () => nat('hyperBattery'), // minta pengecualian optimasi baterai (dialog sistem, hanya di APK)
   status: () => ({ aktif: S.on, wakeLock: !!S.wl, audioSenyap: !!(S.ac && S.ac.state === 'running'), konteksGPU: S.ctx, previewMax: ML.previewMax(),
     baterai: S.bat ? Math.round(S.bat.level * 100) + '%' + (S.bat.charging ? ' (mengisi)' : '') : 'n/a', ditahan: pinned.size, catatan: S.why.slice() })
 };

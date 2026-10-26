@@ -12,6 +12,13 @@ ML.BLENDS = [['normal', 'Normal', 'source-over'], ['multiply', 'Multiply', 'mult
   /* MASK: berlaku pada semua yang ada di bawahnya dalam kanvas yang sama (di dalam grup = hanya isi grup itu) */
   ['mask_in', 'Mask: tampil di dalam', 'destination-in'], ['mask_out', 'Mask: potong', 'destination-out'], ['mask_xor', 'Mask: XOR', 'xor']];
 ML.PREVIEW_Q = [[360, 'Sangat rendah'], [480, 'Rendah'], [720, 'Sedang'], [1080, 'Tinggi']];
+/* v0.4.7: kualitas preview AUDIO (hanya pratinjau; ekspor selalu penuh). Makin rendah = makin stabil/ringan, suara tidak putus-putus.
+   lat = latencyHint AudioContext (buffer lebih besar = tahan tersendat), drift = toleransi sinkron (detik) sebelum seek koreksi,
+   gap = jeda minimal antar seek koreksi per suara (ms), cap = maks suara yang diputar bersamaan di preview. */
+ML.AUDIO_Q = [[1, 'Sangat rendah'], [2, 'Rendah'], [3, 'Sedang'], [4, 'Tinggi']];
+ML.AUDIO_PROFILE = { 1: { lat: 'playback', drift: 1.2, gap: 4000, cap: 3, skipSilent: true }, 2: { lat: 'playback', drift: 0.8, gap: 2500, cap: 6, skipSilent: true },
+  3: { lat: 'balanced', drift: 0.45, gap: 1500, cap: 12, skipSilent: true }, 4: { lat: 'interactive', drift: 0.3, gap: 0, cap: 1e9, skipSilent: false } };
+ML.audioQ = () => { const v = +(ML.lsGet('ml.aq') || 3); return ML.AUDIO_PROFILE[v] ? v : 3; };
 ML.previewMax = () => +(ML.lsGet('ml.pv') || 480);
 
 /** resolusi = sisi terpendek (1080p di 9:16 => 1080x1920) */

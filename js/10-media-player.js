@@ -94,9 +94,18 @@ ML.audio = {
   ensure() {
     if (this.ctx) return this.ctx;
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
-    this.ctx = new AC(); this.master = this.ctx.createGain(); this.master.connect(this.ctx.destination);
-    this.dest = this.ctx.createMediaStreamDestination(); this.master.connect(this.dest);
+    const lat = ML.AUDIO_PROFILE[ML.audioQ()].lat; // buffer lebih besar di kualitas rendah: tahan beban berat tanpa putus-putus
+    try { this.ctx = new AC({ latencyHint: lat }); } catch (e) { this.ctx = new AC(); }
+    this.master = this.ctx.createGain(); this.master.connect(this.ctx.destination);
+    this._dest = null; // MediaStreamDestination dibuat hanya saat dibutuhkan (ekspor) -> beban preview lebih kecil
     return this.ctx;
+  },
+  get dest() { if (!this.ctx) return null; if (!this._dest) { this._dest = this.ctx.createMediaStreamDestination(); this.master.connect(this._dest); } return this._dest; },
+  /** terapkan kualitas baru: pemutar dihentikan, elemen media dibuat ulang di AudioContext baru (satu elemen hanya boleh tersambung ke satu konteks) */
+  reset() {
+    try { ML.player.pause(); } catch (e) { /* abaikan */ }
+    ML.media.els.forEach(e => { try { e.pause(); e.removeAttribute('src'); e.load(); } catch (x) { /* abaikan */ } });
+    ML.media.els.clear(); this.close();
   },
   attach(el) {
     const c = this.ensure(); if (!c) return;
@@ -104,10 +113,11 @@ ML.audio = {
   },
   setVolume(el, L) {
     const v = (L.muted || L.hidden) ? 0 : L.volume / 100;
+    if (el._v === v) return; el._v = v; // tidak menulis ulang nilai yang sama tiap frame
     if (el._gain) el._gain.gain.value = v; else el.volume = Math.min(1, v);
   },
   resume() { if (this.ctx && this.ctx.state !== 'running') this.ctx.resume(); },
-  close() { if (this.ctx) { try { this.ctx.close(); } catch (e) { /* abaikan */ } this.ctx = null; } }
+  close() { if (this.ctx) { try { this.ctx.close(); } catch (e) { /* abaikan */ } this.ctx = null; this._dest = null; } }
 };
 
 /* ---------- pool media ---------- */
@@ -248,7 +258,17 @@ ML.player = {
   redraw() { if (this._rq) return; this._rq = requestAnimationFrame(() => { this._rq = 0; if (!this.playing) this.draw(); }); },
   pauseAll() { ML.media.els.forEach(e => { if (!e.paused) e.pause(); }); },
   syncMedia(playing) {
-    const t = this.t;
+    const t = this.t, prof = ML.AUDIO_PROFILE[ML.audioQ()], full = ML.exporting || prof.cap >= 1e9;
+    const drift = ML.exporting ? ML.AUDIO_PROFILE[4].drift : prof.drift, now = performance.now();
+    let slots = full ? 1e9 : prof.cap;
+    /* di kualitas rendah: urutkan suara aktif (volume terbesar & lapisan audio dahulu), sisanya tidak diputar di preview */
+    let allow = null;
+    if (!full && playing) {
+      const act = [];
+      for (const L of this.proj.layers) if ((L.type === 'video' || L.type === 'audio') && !L.hidden && !L.muted && L.volume > 0 && t >= L.start && t < L.start + L.dur) act.push(L);
+      act.sort((x, y) => ((y.type === 'audio') - (x.type === 'audio')) || (y.volume - x.volume));
+      allow = new Set(act.slice(0, slots).map(L => L.id));
+    }
     for (const L of this.proj.layers) {
       if (L.type !== 'video' && L.type !== 'audio') continue;
       const el = ML.media.el(L); if (!el) continue;
@@ -257,8 +277,10 @@ ML.player = {
       const target = L.trimIn + (t - L.start);
       if (!inRange) { if (!el.paused) el.pause(); continue; }
       if (playing) {
-        if (el.paused) { if (Math.abs(el.currentTime - target) > 0.05) el.currentTime = target; el.play().catch(() => { }); }
-        else if (Math.abs(el.currentTime - target) > 0.3) el.currentTime = target;
+        const silent = prof.skipSilent && !ML.exporting && L.type === 'audio' && (L.muted || L.volume <= 0); // layer audio senyap tidak perlu diputar
+        if (silent || (allow && !allow.has(L.id) && L.type === 'audio')) { if (!el.paused) el.pause(); continue; }
+        if (el.paused) { if (Math.abs(el.currentTime - target) > 0.05) el.currentTime = target; el._fix = now; el.play().catch(() => { }); }
+        else if (Math.abs(el.currentTime - target) > drift && (ML.exporting || !el._fix || now - el._fix >= prof.gap)) { el.currentTime = target; el._fix = now; }
       } else {
         if (!el.paused) el.pause();
         if (L.type === 'video' && Math.abs(el.currentTime - target) > 0.02) el.currentTime = target;

@@ -712,6 +712,7 @@ ML.Editor = function (proj) {
       body.append(PN.sec('Nama proyek'), h('input', { class: 'txt', type: 'text', value: proj.name, oninput: e => { nameIn.value = e.target.value; dirty = true; scheduleSave(); } }),
         PN.sec('Warna latar'), bgBtn, PN.toggleChips([[false, 'Warna'], [true, 'Transparan']], () => proj.bg === 'transparent', v => { cp(); if (v) { proj._bgS = proj.bg; proj.bg = 'transparent'; } else proj.bg = proj._bgS || '#000000'; draw(); scheduleSave(); }),
         PN.sec('Kualitas preview (makin rendah makin lancar)'), PN.toggleChips(ML.PREVIEW_Q.map(([v, l]) => [v, l]), () => ML.previewMax(), v => { ML.lsSet('ml.pv', v); layoutPv(); }),
+        PN.sec('Kualitas preview audio (makin rendah makin stabil, suara tidak putus-putus)'), PN.toggleChips(ML.AUDIO_Q.map(([v, l]) => [v, l]), () => ML.audioQ(), v => { if (v === ML.audioQ()) return; ML.lsSet('ml.aq', v); ML.audio.reset(); ML.toast('Preview audio: ' + ML.AUDIO_Q.find(q => q[0] === v)[1] + ' (ekspor tetap kualitas penuh). Tekan putar lagi.', 3200); }),
         PN.sec('Tampilan editor'), PN.toggleChips([['mobile', 'Mobile'], ['desk', 'Desktop']], () => ML.uiMode(), v => ML.setUi(v)),
         PN.sec('Snap (magnet) ke playhead, penanda, dan tepi layer'), PN.toggleChips([[true, 'Hidup'], [false, 'Mati']], () => ST.snap, v => { ST.snap = v; ML.lsSet('ml.snap', v ? '1' : '0'); }),
         h('button', { class: 'row-btn', html: I('flag') + 'Daftar penanda', onclick: () => { close(); markersSheet(); } }),

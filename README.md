@@ -1,3 +1,3 @@
 # MotionLyn
 
-Versi 0.1.5 beta
+Versi 0.2.5 beta

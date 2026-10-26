@@ -11,7 +11,7 @@ ML.Editor = function (proj) {
   const h = ML.h, I = ML.icon, P = ML.player, clamp = ML.clamp;
   P.init(proj); proj.layers.forEach(ML.ensureLayer);
   const rend = new ML.Renderer();
-  const ST = { sel: null, pps: 90, panel: null, snap: ML.lsGet('ml.snap') !== '0', pvH: Math.round(innerHeight * (ML.uiMode() === 'desk' ? 0.5 : 0.34)), desk: ML.uiMode() === 'desk', big: false, kf: null, link: true, openFx: new Set() };
+  const ST = { sel: null, pps: 90, panel: null, snap: ML.lsGet('ml.snap') !== '0', pvH: Math.round(innerHeight * (ML.uiMode() === 'desk' ? 0.5 : 0.34)), desk: ML.uiMode() === 'desk', big: false, kf: null, link: true, openFx: new Set(), grp: null, mm: false, multi: [] };
   const undo = [], redo = []; let lastKey = null, lastTime = 0, dirty = false, saveT = 0, updT = 0;
   const sel = () => proj.layers.find(l => l.id === ST.sel) || null;
   const eps = () => 0.5 / proj.fps;
@@ -20,11 +20,12 @@ ML.Editor = function (proj) {
 
   /* ================= DOM ================= */
   const cv = h('canvas', { class: 'pv-cv' }), ov = h('canvas', { class: 'pv-ov' });
-  const box = h('div', { class: 'pv-box' }, cv, ov), pv = h('div', { class: 'pv' }, box);
+  const box = h('div', { class: 'pv-box' }, cv), pv = h('div', { class: 'pv' }, box, ov); // overlay menutupi seluruh area preview (bukan cuma bingkai) agar hitbox layer tetap terlihat & bisa disentuh di luar bingkai
   const nameIn = h('input', { class: 'ed-name', type: 'text', value: proj.name, oninput: () => { dirty = true; scheduleSave(); } });
   const btn = (ic, cls, fn) => h('button', { class: 'icon-btn ' + (cls || ''), html: I(ic), onclick: fn });
   const bUndo = btn('undo', '', () => doUndo()), bRedo = btn('redo', '', () => doRedo());
-  const bPlay = btn('play', 'play', () => togglePlay());
+  let lpFired = false;
+  const bPlay = btn('play', 'play', () => { if (lpFired) { lpFired = false; return; } togglePlay(); });
   const top = h('header', { class: 'ed-top' });
   const splitter = h('div', { class: 'splitter' }, h('i'));
   const bFlag = btn('flag', '', () => addMarker());
@@ -38,7 +39,8 @@ ML.Editor = function (proj) {
   const tools = h('div', { class: 'tools' }); tools.hidden = true;
   const pframe = h('div', { class: 'pframe' }); pframe.hidden = true;
   const sideEmpty = h('div', { class: 'side-empty', text: 'Pilih layer di timeline untuk mengatur Move & Transform, efek, warna, dan lainnya.' });
-  const edEl = h('div', { class: 'editor' + (ST.desk ? ' desk' : '') }, top, pv, splitter, transport, tl, sideEmpty, tools, pframe);
+  const gbar = h('div', { class: 'gbar' }), mbar = h('div', { class: 'mbar' }); gbar.hidden = mbar.hidden = true;
+  const edEl = h('div', { class: 'editor' + (ST.desk ? ' desk' : '') }, top, pv, splitter, transport, gbar, mbar, tl, sideEmpty, tools, pframe);
   ML.$('#app').replaceChildren(edEl);
   { const edT = h('span', { class: 'edtime' }); transport.append(edT); proj.editSecs = proj.editSecs || 0;
     const fmtT = n => [Math.floor(n / 3600), Math.floor(n / 60) % 60, n % 60].map(x => String(x).padStart(2, '0')).join(':');
@@ -56,6 +58,7 @@ ML.Editor = function (proj) {
   function updHist() { bUndo.disabled = !undo.length; bRedo.disabled = !redo.length; }
   function afterRestore() {
     if (ST.sel && !sel()) ST.sel = null;
+    if (ST.grp && !gLayer()) ST.grp = null; ST.multi = ST.multi.filter(id => proj.layers.some(l => l.id === id)); renderGM();
     ST.kf = null; P.t = clamp(P.t, 0, P.dur()); lastKey = null;
     scheduleSave(); layoutPv(); buildLanes(); renderBar(); PN.rebuild(); draw(); updHist();
   }
@@ -79,33 +82,41 @@ ML.Editor = function (proj) {
   /* ================= preview ================= */
   function layoutPv() {
     const bottom = ST.desk ? 0 : (!pframe.hidden ? pframe.offsetHeight : (!tools.hidden ? tools.offsetHeight : 0));
-    const pvh = clamp(ST.pvH, 110, Math.max(120, innerHeight - 52 - 16 - 54 - bottom - 150)); ST.pvEff = pvh;
+    const pvh = clamp(ST.pvH, 110, Math.max(120, innerHeight - (top.offsetHeight || 52) - 16 - ((document.querySelector('.transport') || {}).offsetHeight || 54) - bottom - 150)); ST.pvEff = pvh;
     pv.style.height = pvh + 'px';
-    const aw = pv.clientWidth - 16, ah = pvh - 12, ar = proj.w / proj.h;
+    const aw = pv.clientWidth - 28, ah = pvh - 28, ar = vw() / vh(); // sisakan tepi 14px agar garis seleksi di luar bingkai kelihatan
     let w = aw, hh = w / ar; if (hh > ah) { hh = ah; w = hh * ar; }
     box.style.width = w + 'px'; box.style.height = hh + 'px';
-    const sc = Math.min(1, ML.previewMax() / Math.max(proj.w, proj.h));
-    const cw = Math.max(2, Math.round(proj.w * sc)), ch = Math.max(2, Math.round(proj.h * sc));
+    const sc = Math.min(1, ML.previewMax() / Math.max(vw(), vh()));
+    const cw = Math.max(2, Math.round(vw() * sc)), ch = Math.max(2, Math.round(vh() * sc));
     if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
-    const dpr = window.devicePixelRatio || 1; ov.width = Math.round(w * dpr); ov.height = Math.round(hh * dpr);
+    const dpr = window.devicePixelRatio || 1; ov.width = Math.max(2, Math.round(pv.clientWidth * dpr)); ov.height = Math.max(2, Math.round(pvh * dpr));
     draw(); drawRuler();
   }
   function draw(t = P.t) {
     const dur = P.dur(), rt = Math.min(t, Math.max(0, dur - 0.001));
-    rend.render(cv, proj, rt, { maxSamples: 5 });
+    rend.render(cv, view(), rt, { maxSamples: 5, rootGid: ST.grp || null, checker: !!ST.grp });
     drawOverlay(rt); updateTime(t);
   }
   function drawOverlay(t) {
     const g = ov.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, ov.width, ov.height);
+    const k = box.clientWidth / vw(), dpr = window.devicePixelRatio || 1, ox = box.offsetLeft, oy = box.offsetTop; // k = piksel CSS per satuan komposisi
+    const frame = (L, handle) => {
+      const q = ML.geom(L, t), hw = q.w * q.sx * k / 2, hh = q.h * q.sy * k / 2; // posisi bingkai di dalam area preview
+      g.save(); g.scale(dpr, dpr); g.translate(ox + q.x * k, oy + q.y * k); g.rotate(q.rot);
+      g.strokeStyle = L.locked ? '#ff7a45' : '#ff3fb0'; g.lineWidth = 2; g.strokeRect(-hw, -hh, 2 * hw, 2 * hh);
+      if (handle && !L.locked) { g.fillStyle = '#1d0f26'; g.beginPath(); g.arc(hw, hh, 9, 0, Math.PI * 2); g.fill(); g.stroke(); }
+      g.restore();
+    };
+    if (ST.mm) { /* v3.87: mode pilih banyak layer -> tiap layer terpilih punya garis media (bingkai) pink, tanpa pegangan */
+      for (const id of ST.multi) { const M = proj.layers.find(l => l.id === id); if (M && M.type !== 'audio' && !M.hidden && inRange(M, t)) frame(M, false); }
+      return;
+    }
     const L = sel(); if (!L || L.type === 'audio' || !inRange(L, t)) return;
-    const q = ML.geom(L, t), k = ov.width / proj.w, dpr = window.devicePixelRatio || 1;
-    const hw = q.w * q.sx * k / 2, hh = q.h * q.sy * k / 2;
-    g.save(); g.translate(q.x * k, q.y * k); g.rotate(q.rot);
-    g.strokeStyle = L.locked ? '#ff7a45' : '#ff3fb0'; g.lineWidth = 2 * dpr; g.strokeRect(-hw, -hh, 2 * hw, 2 * hh);
-    if (!L.locked) { g.fillStyle = '#1d0f26'; g.beginPath(); g.arc(hw, hh, 9 * dpr, 0, Math.PI * 2); g.fill(); g.stroke(); }
-    g.restore();
+    frame(L, true);
   }
-  const toComp = e => { const r = ov.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * proj.w, y: (e.clientY - r.top) / r.height * proj.h, k: r.width / proj.w }; };
+  /* koordinat relatif ke bingkai komposisi (boleh negatif / di luar bingkai) */
+  const toComp = e => { const r = box.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * vw(), y: (e.clientY - r.top) / r.height * vh(), k: r.width / vw() }; };
   const ptrs = new Map(); let pm = null;
   ov.addEventListener('pointerdown', e => {
     ov.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -124,7 +135,8 @@ ML.Editor = function (proj) {
     }
     let target = null;
     if (L && L.type !== 'audio' && !L.hidden && inRange(L) && ML.hit(L, P.t, c.x, c.y)) target = L;
-    else for (let i = proj.layers.length - 1; i >= 0; i--) { const q = proj.layers[i]; if (q.type !== 'audio' && !q.hidden && inRange(q) && ML.hit(q, P.t, c.x, c.y)) { target = q; break; } }
+    else for (let i = proj.layers.length - 1; i >= 0; i--) { const q = proj.layers[i]; if (inView(q) && q.type !== 'audio' && !q.hidden && inRange(q) && ML.hit(q, P.t, c.x, c.y)) { target = q; break; } }
+    if (target && ST.mm) { toggleMulti(target.id); pm = { mode: 'none' }; return; }
     if (target) {
       if (target.id !== ST.sel) select(target.id);
       const g = ML.geom(target, P.t);
@@ -177,9 +189,10 @@ ML.Editor = function (proj) {
     inner.style.width = (dur * pps + lanes.clientWidth) + 'px';
     inner.replaceChildren();
     proj.markers.forEach(m => inner.append(h('div', { class: 'mk-line', style: { left: m.t * pps + 'px' } })));
-    for (let i = proj.layers.length - 1; i >= 0; i--) inner.append(rowEl(proj.layers[i]));
-    lheads.replaceChildren(...proj.layers.slice().reverse().map(headEl));
-    hint.hidden = proj.layers.length > 0;
+    const vis = proj.layers.filter(inView);
+    for (let i = vis.length - 1; i >= 0; i--) inner.append(rowEl(vis[i]));
+    lheads.replaceChildren(...vis.slice().reverse().map(headEl));
+    hint.hidden = vis.length > 0 || !!ST.grp;
     positionInner(); drawRuler();
   }
   function headEl(L) {
@@ -187,12 +200,12 @@ ML.Editor = function (proj) {
     if (L.type === 'image' && it) th.style.backgroundImage = 'url(' + it.url + ')';
     else if (L.type === 'video' && it) { if (it.thumb) th.style.backgroundImage = 'url(' + it.thumb + ')'; else ML.media.thumb(it).then(u => { if (u && th.isConnected) th.style.backgroundImage = 'url(' + u + ')'; }); }
     else th.innerHTML = I(L.type === 'audio' ? 'audio' : L.type === 'text' ? 'text' : 'shape');
-    return h('div', { class: 'lh' + (L.id === ST.sel ? ' sel' : '') + (L.hidden ? ' off' : ''), style: L.tag ? { borderColor: L.tag } : null },
+    return h('div', { class: 'lh' + (L.id === ST.sel ? ' sel' : '') + (ST.multi.includes(L.id) ? ' msel' : '') + (L.hidden ? ' off' : ''), style: L.tag ? { borderColor: L.tag } : null, onclick: e => { if (e.target.closest('.lh-eye')) return; if (ST.mm) toggleMulti(L.id); else select(L.id); } },
       h('button', { class: 'lh-eye', title: L.hidden ? 'Tampilkan layer' : 'Sembunyikan layer', html: I(L.hidden ? 'eyeoff' : 'eye'), onclick: () => { cp(); L.hidden = !L.hidden; P.syncMedia(false); buildLanes(); draw(); scheduleSave(); } }), th);
   }
   function rowEl(L) {
     const pps = ST.pps, on = L.id === ST.sel;
-    const clip = h('div', { class: 'clip ' + L.type + (on ? ' sel' : '') + (L.locked ? ' locked' : '') + (L.hidden ? ' hid' : ''), style: { left: L.start * pps + 'px', width: Math.max(6, L.dur * pps) + 'px' } });
+    const clip = h('div', { class: 'clip ' + L.type + (on ? ' sel' : '') + (ST.multi.includes(L.id) ? ' msel' : '') + (L.locked ? ' locked' : '') + (L.hidden ? ' hid' : ''), style: { left: L.start * pps + 'px', width: Math.max(6, L.dur * pps) + 'px' } });
     clip.dataset.id = L.id;
     if (L.tag) { clip.dataset.tag = '1'; clip.style.setProperty('--tag', L.tag); }
     const it = ML.media.items.get(L.mediaId);
@@ -207,6 +220,7 @@ ML.Editor = function (proj) {
     clip.append(h('span', { class: 'clip-name' }, L.locked ? h('i', { html: I('lock') }) : null, L.name));
     if (on && !L.locked) clip.append(h('i', { class: 'hdl l' }), h('i', { class: 'hdl r' }));
     if (on && !L.locked && (L.type === 'image' || L.type === 'video' || L.type === 'audio') && L.dur * pps >= 110) clip.append(h('button', { class: 'clip-act', title: 'Ganti media', html: I('swap') + '<span>Ganti</span>', onclick: e => { e.stopPropagation(); PN.replaceSheet(L); } }));
+    if (on && L.type === 'group' && L.dur * pps >= 70) clip.append(h('button', { class: 'clip-act', title: 'Buka grup', html: I('layers') + '<span>Buka</span>', onclick: e => { e.stopPropagation(); openGroup(L.id); } }));
     if (on) kfTimes(L).forEach(t => { const d = h('i', { class: 'kfd', html: I('diamond'), style: { left: t * pps - 6 + 'px' } }); d.dataset.t = t; clip.append(d); });
     return h('div', { class: 'row' }, clip);
   }
@@ -220,7 +234,7 @@ ML.Editor = function (proj) {
     }
   }
   function drawRuler() {
-    const W = tl.clientWidth, dpr = window.devicePixelRatio || 1, H = 32;
+    const W = tl.clientWidth, dpr = window.devicePixelRatio || 1, H = document.documentElement.getAttribute('data-density') === 'normal' ? 32 : 28;
     if (!W) return;
     if (ruler.width !== Math.round(W * dpr)) { ruler.width = Math.round(W * dpr); ruler.height = H * dpr; ruler.style.height = H + 'px'; }
     const g = ruler.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
@@ -308,18 +322,130 @@ ML.Editor = function (proj) {
     if (!dd.moved && e.type === 'pointerup') {
       if (dd.kfd) { P.seek((dd.L ? dd.L.start : 0) + +dd.kfd.dataset.t); return; }
       if (dd.onRuler) { const r = ruler.getBoundingClientRect(), t = P.t + (e.clientX - r.left - r.width / 2) / ST.pps, m = proj.markers.find(k => Math.abs(k.t - t) < 14 / ST.pps); if (m) { markersSheet(); return; } P.seek(t); return; }
-      if (dd.L) { if (dd.L.id !== ST.sel) select(dd.L.id); } else select(null);
+      if (dd.L) { if (ST.mm) toggleMulti(dd.L.id); else if (dd.L.id !== ST.sel) select(dd.L.id); } else if (!ST.mm) select(null);
     } else if (dd.moved) { buildLanes(); }
   };
   tl.addEventListener('pointerup', tlUp); tl.addEventListener('pointercancel', tlUp);
 
+
+  /* ================= grup & pilih banyak ================= */
+  const gLayer = () => (ST.grp && proj.layers.find(l => l.id === ST.grp)) || null;
+  const inView = L => (L.gid || null) === (ST.grp || null);
+  const vw = () => { const G = gLayer(); return G ? G.bw : proj.w; }, vh = () => { const G = gLayer(); return G ? G.bh : proj.h; };
+  function descIds(id) { const ids = new Set([id]); let grew = true; while (grew) { grew = false; for (const k of proj.layers) if (k.gid && ids.has(k.gid) && !ids.has(k.id)) { ids.add(k.id); grew = true; } } ids.delete(id); return ids; }
+  function view() {
+    const G = gLayer(); if (!G) return proj;
+    const ids = descIds(G.id);
+    return { w: G.bw, h: G.bh, fps: proj.fps, dur: proj.dur, bg: 'transparent', markers: proj.markers, layers: proj.layers.filter(l => ids.has(l.id)) };
+  }
+  const gname = id => { const g = proj.layers.find(l => l.id === id); return g ? g.name : ''; };
+  function renderGM() {
+    gbar.hidden = !ST.grp; mbar.hidden = !ST.mm;
+    gbar.replaceChildren(); mbar.replaceChildren();
+    if (ST.grp) {
+      const G = gLayer(), n = proj.layers.filter(l => l.gid === ST.grp).length;
+      gbar.append(h('button', { class: 'gb-btn', text: '‹ Keluar grup', onclick: exitGroup }), h('span', { class: 'gb-t', text: (G ? G.name : 'Grup') + ' · ' + n + ' layer' }));
+    }
+    if (ST.mm) {
+      const n = ST.multi.length, mb = (t, fn, cls) => h('button', { class: 'mb-btn ' + (cls || ''), text: t, onclick: fn });
+      mbar.append(h('span', { class: 'mb-n', text: n + ' dipilih' }), mb('Semua', selectAll), mb('Grupkan', groupMulti, n ? '' : 'dis'), mb('Duplikat', dupMulti, n ? '' : 'dis'), mb('Hapus', delMulti, n ? 'dis2' : 'dis'), mb('Selesai', () => multiMode(false), 'done'));
+    }
+    fab.hidden = !!ST.sel || ST.mm;
+  }
+  function multiMode(on, firstId) {
+    ST.mm = !!on; ST.multi = on && firstId ? [firstId] : []; ST.kf = null;
+    if (on) { ST.sel = null; if (ST.panel) PN.closePanel(); }
+    renderBar(); buildLanes(); draw();
+  }
+  function toggleMulti(id) { const i = ST.multi.indexOf(id); if (i >= 0) ST.multi.splice(i, 1); else ST.multi.push(id); renderGM(); buildLanes(); draw(); }
+  function selectAll() { const all = proj.layers.filter(inView).map(l => l.id); ST.multi = ST.multi.length === all.length ? [] : all; if (!ST.mm) { ST.mm = true; ST.sel = null; if (ST.panel) PN.closePanel(); renderBar(); } renderGM(); buildLanes(); draw(); }
+  const multiLayers = () => ST.multi.map(id => proj.layers.find(l => l.id === id)).filter(Boolean);
+  function groupLayers(ls) {
+    ls = ls.filter(l => l.type !== 'audio');
+    if (!ls.length) { ML.toast('Pilih layer visual dulu (audio tidak bisa masuk grup)'); return null; }
+    cp();
+    const st = Math.min(...ls.map(l => l.start)), en = Math.max(...ls.map(l => l.start + l.dur));
+    const G = ML.makeLayer({ w: vw(), h: vh() }, 'group', { name: 'Grup', start: st, dur: Math.max(0.05, en - st), bw: vw(), bh: vh() });
+    G.gid = ST.grp || null;
+    const top = Math.max(...ls.map(l => proj.layers.indexOf(l)));
+    proj.layers.splice(top + 1, 0, G);
+    ls.forEach(l => { l.gid = G.id; });
+    return G;
+  }
+  function groupMulti() {
+    const G = groupLayers(multiLayers()); if (!G) return;
+    ST.mm = false; ST.multi = []; ST.sel = G.id; renderBar(); changed(true); ML.toast('Grup dibuat. Buka lewat tombol “Buka” atau menu layer.');
+  }
+  function groupSel() { const L = sel(); if (!L || !guard(L)) return; const G = groupLayers([L]); if (!G) return; ST.sel = G.id; renderBar(); changed(true); }
+  function openGroup(id) {
+    const G = proj.layers.find(l => l.id === (id || ST.sel)); if (!G || G.type !== 'group') return;
+    ST.grp = G.id; ST.sel = null; ST.mm = false; ST.multi = []; if (ST.panel) PN.closePanel();
+    P.seek(clamp(P.t, G.start, G.start + G.dur - 0.001));
+    renderBar(); layoutPv(); buildLanes(); draw();
+  }
+  function exitGroup() {
+    const G = gLayer(); if (!G) return;
+    ST.grp = G.gid || null; ST.sel = G.id; ST.mm = false; ST.multi = []; renderBar(); layoutPv(); buildLanes(); draw();
+  }
+  const evA = (a, t) => ML.evalAnim(a, t);
+  function ungroupSel() {
+    const G = sel(); if (!G || G.type !== 'group' || !guard(G)) return;
+    const kids = proj.layers.filter(l => l.gid === G.id); cp();
+    const stat = G.p.x.k.length + G.p.y.k.length + G.p.sx.k.length + G.p.sy.k.length + G.p.rot.k.length + G.p.op.k.length === 0;
+    const neutral = stat && Math.abs(G.p.x.v - G.bw / 2) < 1e-6 && Math.abs(G.p.y.v - G.bh / 2) < 1e-6 && Math.abs(G.p.sx.v - 100) < 1e-6 && Math.abs(G.p.sy.v - 100) < 1e-6 && Math.abs(G.p.rot.v) < 1e-6 && Math.abs(G.p.op.v - 100) < 1e-6;
+    const gx = (G.gid ? proj.layers.find(l => l.id === G.gid) : null), pw = gx ? gx.bw : proj.w, ph = gx ? gx.bh : proj.h;
+    for (const c of kids) {
+      if (!neutral) {
+        // terapkan transform grup ke tiap anak (disampel): posisi dihitung dari tengah scene grup
+        const ts = new Set([0, c.dur]);
+        const addK = (a, off) => (a.k || []).forEach(q => { const t = q.t + off; if (t > 0 && t < c.dur) ts.add(+t.toFixed(6)); });
+        ['x', 'y', 'sx', 'sy', 'rot', 'op'].forEach(k => { addK(c.p[k], 0); addK(G.p[k], G.start - c.start); });
+        const base = [...ts].sort((a, b) => a - b), all = new Set(base);
+        if (!stat || ['x', 'y', 'sx', 'sy', 'rot', 'op'].some(k => c.p[k].k.length)) base.forEach((t, i) => { if (i + 1 < base.length) for (const f of [.25, .5, .75]) all.add(+(t + (base[i + 1] - t) * f).toFixed(6)); });
+        const arr = [...all].sort((a, b) => a - b), out = { x: [], y: [], sx: [], sy: [], rot: [], op: [] };
+        arr.forEach(t => {
+          const gl = t + c.start - G.start, gsx = evA(G.p.sx, gl) / 100, gsy = evA(G.p.sy, gl) / 100, gr = evA(G.p.rot, gl) * Math.PI / 180;
+          const dx = (evA(c.p.x, t) - G.bw / 2) * gsx, dy = (evA(c.p.y, t) - G.bh / 2) * gsy;
+          out.x.push(evA(G.p.x, gl) + dx * Math.cos(gr) - dy * Math.sin(gr)); out.y.push(evA(G.p.y, gl) + dx * Math.sin(gr) + dy * Math.cos(gr));
+          out.sx.push(evA(c.p.sx, t) * gsx); out.sy.push(evA(c.p.sy, t) * gsy); out.rot.push(evA(c.p.rot, t) + gr * 180 / Math.PI); out.op.push(evA(c.p.op, t) * evA(G.p.op, gl) / 100);
+        });
+        const LIN = [0, 0, 1, 1];
+        for (const k in out) { const vs = out[k]; c.p[k] = (Math.max(...vs) - Math.min(...vs) < 1e-6) ? { v: vs[0], k: [] } : { v: vs[0], k: arr.map((t, i) => ({ t, v: vs[i], e: i + 1 < arr.length ? LIN : null })) }; }
+        if (pw !== G.bw || ph !== G.bh) { /* ukuran kanvas induk berbeda: posisi sudah dalam koordinat induk lewat G.p */ }
+      }
+      if (G.fx.length) G.fx.forEach(e => { const cl = ML.clone(e); cl.id = ML.uid(); const sh = G.start - c.start; Object.values(cl.p || {}).forEach(a => (a.k || []).forEach(q => { q.t += sh; })); c.fx.push(cl); });
+      if (G.blend && G.blend !== 'normal' && (!c.blend || c.blend === 'normal')) c.blend = G.blend;
+      c.gid = G.gid || null;
+    }
+    proj.layers.splice(proj.layers.indexOf(G), 1); ST.sel = kids.length ? kids[kids.length - 1].id : null;
+    renderBar(); changed(true);
+    ML.toast(neutral ? 'Grup dibubarkan' : 'Grup dibubarkan. Posisi/skala/rotasi/opacity & efek grup diterapkan ke tiap layer.', 3500);
+  }
+  function dupTree(L, newGid) {
+    const C = ML.duplicateLayer(proj, L); if (newGid !== undefined) C.gid = newGid;
+    if (L.type === 'group') proj.layers.filter(k => k.gid === L.id && k !== C).forEach(k => dupTree(k, C.id));
+    return C;
+  }
+  function dupMulti() {
+    const ls = multiLayers(); if (!ls.length) return; cp();
+    const made = ls.map(l => dupTree(l).id); ST.multi = made; renderBar(); changed(true);
+  }
+  function delMulti() {
+    const ls = multiLayers().filter(l => !l.locked); if (!ls.length) { ML.toast('Pilih layer yang tidak terkunci'); return; }
+    cp(); const rm = new Set(); ls.forEach(l => { rm.add(l.id); descIds(l.id).forEach(i => rm.add(i)); });
+    rm.forEach(id => { const e = ML.media.els.get(id); if (e) e.pause(); });
+    proj.layers = proj.layers.filter(l => !rm.has(l.id)); ST.multi = []; ST.mm = false; ST.sel = null;
+    renderBar(); P.t = clamp(P.t, 0, P.dur()); changed(true);
+  }
+
   /* ================= seleksi / toolbar ================= */
   function select(id) {
+    if (ST.mm) { if (id) toggleMulti(id); return; }
     ST.sel = id; ST.kf = null; buildLanes();
     if (ST.panel) { if (!id) PN.closePanel(); else { PN.renderTop(); PN.rebuild(); } }
     renderBar(); draw();
   }
-  function renderBar() { PN.renderTop(); PN.renderTools(); fab.hidden = !!ST.sel; layoutPv(); }
+  function renderBar() { PN.renderTop(); PN.renderTools(); renderGM(); layoutPv(); }
   function toggleLock() { const L = sel(); if (!L) return; cp(); L.locked = !L.locked; if (L.locked && ST.panel) PN.closePanel(); buildLanes(); renderBar(); draw(); scheduleSave(); }
   function toggleHide() { const L = sel(); if (!L || !guard(L)) return; cp(); L.hidden = !L.hidden; P.syncMedia(false); buildLanes(); renderBar(); draw(); scheduleSave(); }
   function toggleMute() { const L = sel(); if (!L || !guard(L)) return; cp(); L.muted = !L.muted; ML.audio.setVolume(ML.media.el(L), L); renderBar(); scheduleSave(); }
@@ -338,7 +464,7 @@ ML.Editor = function (proj) {
     if (P.t - L.start < 0.02 || L.start + L.dur - P.t < 0.02) { ML.toast('Geser playhead ke dalam layer untuk memotong'); return; }
     cp(); ML.splitLayer(proj, L, P.t); P.syncMedia(false); changed(true); ML.toast('Layer dipotong');
   }
-  function dupSel() { const L = sel(); if (!L) return; cp(); const C = ML.duplicateLayer(proj, L); select(C.id); scheduleSave(); }
+  function dupSel() { const L = sel(); if (!L) return; cp(); const C = dupTree(L); select(C.id); scheduleSave(); }
   function moveSel(d) {
     const L = sel(); if (!L || !guard(L)) return; const i = proj.layers.indexOf(L), j = i + d;
     if (j < 0 || j >= proj.layers.length) return; cp(); proj.layers.splice(i, 1); proj.layers.splice(j, 0, L); changed(true);
@@ -346,10 +472,26 @@ ML.Editor = function (proj) {
   async function delSel() {
     const L = sel(); if (!L || !guard(L)) return;
     cp(); const e = ML.media.els.get(L.id); if (e) e.pause();
-    proj.layers.splice(proj.layers.indexOf(L), 1); ST.sel = null; PN.closePanel(); renderBar(); P.t = clamp(P.t, 0, P.dur()); changed(true);
+    const dead = descIds(L.id); dead.add(L.id); proj.layers = proj.layers.filter(l => !dead.has(l.id)); ST.sel = null; PN.closePanel(); renderBar(); P.t = clamp(P.t, 0, P.dur()); changed(true);
   }
 
   /* ================= transport ================= */
+  /* tombol play/pause ditahan: pilih mode putar "Ulangi" atau "Sekali" */
+  P.loop = ML.lsGet('ml.loop') === '1'; bPlay.classList.toggle('loop', P.loop);
+  function loopMenu() {
+    const back = h('div', { class: 'popback' }), menu = h('div', { class: 'popmenu' }); let closed = false;
+    const handler = () => { close(); return true; };
+    function close() { if (closed) return; closed = true; ML.popBack(handler); back.remove(); }
+    const set = v => { P.loop = v; ML.lsSet('ml.loop', v ? '1' : '0'); bPlay.classList.toggle('loop', v); ML.toast(v ? 'Putar: ulangi terus' : 'Putar: sekali', 1600); };
+    [['Ulangi', true], ['Sekali', false]].forEach(([t, v]) => menu.append(h('button', { class: 'pm-item' + (P.loop === v ? ' on' : ''), text: (P.loop === v ? '✓ ' : '') + t, onclick: () => { close(); set(v); } })));
+    back.append(menu); back.addEventListener('pointerdown', e => { if (e.target === back) close(); });
+    ML.$('#overlays').append(back); ML.pushBack(handler);
+  }
+  { let lpT = 0;
+    const stop = () => { clearTimeout(lpT); lpT = 0; };
+    bPlay.addEventListener('pointerdown', () => { stop(); lpT = setTimeout(() => { lpT = 0; lpFired = true; loopMenu(); }, 450); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => bPlay.addEventListener(ev, stop));
+    bPlay.addEventListener('contextmenu', e => e.preventDefault()); }
   function togglePlay() { if (P.playing) P.pause(); else if (!P.dur()) ML.toast('Tambahkan layer dulu'); else P.play(); }
   P.onstate = on => { bPlay.innerHTML = I(on ? 'pause' : 'play'); };
   P.onframe = t => { draw(t); flagUpd(); };
@@ -456,7 +598,7 @@ ML.Editor = function (proj) {
     L.k3 = kind; L.shape.noFill = true; L.shape.strokeW = 0; if (kind === 'camera') L.p.zoom = ML.A(100);
     pushLayer(L); ML.toast(kind === 'null' ? 'Null object dibuat. Sambungkan layer lain lewat Move & Transform → 3D' : 'Kamera dibuat. Aktifkan mode 3D di layer lain agar ikut kamera');
   }
-  function pushLayer(L) { cp(); proj.layers.push(L); ST.sel = L.id; ST.kf = null; renderBar(); changed(true); }
+  function pushLayer(L) { cp(); if (ST.grp) { L.gid = ST.grp; if (!L.p.x.k.length && Math.abs(L.p.x.v - proj.w / 2) < 1e-6) L.p.x.v = vw() / 2; if (!L.p.y.k.length && Math.abs(L.p.y.v - proj.h / 2) < 1e-6) L.p.y.v = vh() / 2; } proj.layers.push(L); ST.sel = L.id; ST.kf = null; renderBar(); changed(true); }
   /** media contoh (mode AM): foto dari folder am/samplemedia */
   const SAMPLES = ['alps1', 'balloons1', 'cat2', 'city2', 'coffee1', 'jam1', 'kitten1', 'lake1', 'path1', 'road1', 'shore2', 'tulips1'];
   function sampleSheet() {
@@ -565,6 +707,7 @@ ML.Editor = function (proj) {
       body.append(PN.sec('Nama proyek'), h('input', { class: 'txt', type: 'text', value: proj.name, oninput: e => { nameIn.value = e.target.value; dirty = true; scheduleSave(); } }),
         PN.sec('Warna latar'), bgBtn, PN.toggleChips([[false, 'Warna'], [true, 'Transparan']], () => proj.bg === 'transparent', v => { cp(); if (v) { proj._bgS = proj.bg; proj.bg = 'transparent'; } else proj.bg = proj._bgS || '#000000'; draw(); scheduleSave(); }),
         PN.sec('Kualitas preview (makin rendah makin lancar)'), PN.toggleChips(ML.PREVIEW_Q.map(([v, l]) => [v, l]), () => ML.previewMax(), v => { ML.lsSet('ml.pv', v); layoutPv(); }),
+        PN.sec('Tampilan editor'), PN.toggleChips([['mobile', 'Mobile'], ['desk', 'Desktop']], () => ML.uiMode(), v => ML.setUi(v)),
         PN.sec('Snap (magnet) ke playhead, penanda, dan tepi layer'), PN.toggleChips([[true, 'Hidup'], [false, 'Mati']], () => ST.snap, v => { ST.snap = v; ML.lsSet('ml.snap', v ? '1' : '0'); }),
         h('button', { class: 'row-btn', html: I('flag') + 'Daftar penanda', onclick: () => { close(); markersSheet(); } }),
         formatBlock(close), h('p', { class: 'dlg-text', text: 'Sekarang: ' + proj.w + ' × ' + proj.h + ' • ' + proj.fps + ' fps • rasio ' + proj.ratio + ' • durasi ' + ML.fmt(P.dur(), proj.fps) }));
@@ -627,10 +770,10 @@ ML.Editor = function (proj) {
   window.addEventListener('keydown', onKey);
   const onResize = () => { ST.pvH = Math.min(ST.pvH, innerHeight * 0.66); layoutPv(); buildLanes(); };
   window.addEventListener('resize', onResize);
-  ML.onRootBack = () => { if (ST.panel) { PN.closePanel(); return true; } if (ST.sel) { select(null); return true; } return ML.confirmTap('Ketuk sekali lagi untuk keluar ke beranda', exit); };
+  ML.onRootBack = () => { if (ST.panel) { PN.closePanel(); return true; } if (ST.mm) { multiMode(false); return true; } if (ST.sel) { select(null); return true; } if (ST.grp) { exitGroup(); return true; } return ML.confirmTap('Ketuk sekali lagi untuk keluar ke beranda', exit); };
 
   const E = { proj, P, ST, rend, box, top, tools, pframe, nameIn, sel, select, cp, changed, scheduleSave, guard, eps, buildLanes, draw, exit, settingsSheet, exportSheet,
-    dupSel, delSel, splitSel, trimStart, trimEnd, toggleLock, toggleMute, toggleHide, voiceFemale, moveSel, renderBar, setUi, relayout: () => { layoutPv(); buildLanes(); } };
+    multiMode, selectAll, groupSel, groupMulti, openGroup, exitGroup, ungroupSel, dupSel, delSel, splitSel, trimStart, trimEnd, toggleLock, toggleMute, toggleHide, voiceFemale, moveSel, renderBar, setUi, relayout: () => { layoutPv(); buildLanes(); } };
   const PN = ML.Panels(E);
 
   updHist(); layoutPv(); buildLanes(); renderBar(); draw();

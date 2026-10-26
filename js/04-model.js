@@ -6,7 +6,11 @@ ML.RES = { '720p': 720, '1080p': 1080, '2K': 1440, '4K': 2160 };
 ML.FPS = [24, 30, 60, 120, 240];
 ML.BLENDS = [['normal', 'Normal', 'source-over'], ['multiply', 'Multiply', 'multiply'], ['screen', 'Screen', 'screen'],
   ['overlay', 'Overlay', 'overlay'], ['darken', 'Darken', 'darken'], ['lighten', 'Lighten', 'lighten'],
-  ['add', 'Add', 'lighter'], ['difference', 'Difference', 'difference']];
+  ['add', 'Add', 'lighter'], ['difference', 'Difference', 'difference'], ['exclusion', 'Exclusion', 'exclusion'],
+  ['colordodge', 'Color Dodge', 'color-dodge'], ['colorburn', 'Color Burn', 'color-burn'], ['hardlight', 'Hard Light', 'hard-light'], ['softlight', 'Soft Light', 'soft-light'],
+  ['hue', 'Hue', 'hue'], ['saturation', 'Saturation', 'saturation'], ['color', 'Color', 'color'], ['luminosity', 'Luminosity', 'luminosity'],
+  /* MASK: berlaku pada semua yang ada di bawahnya dalam kanvas yang sama (di dalam grup = hanya isi grup itu) */
+  ['mask_in', 'Mask: tampil di dalam', 'destination-in'], ['mask_out', 'Mask: potong', 'destination-out'], ['mask_xor', 'Mask: XOR', 'xor']];
 ML.PREVIEW_Q = [[360, 'Sangat rendah'], [480, 'Rendah'], [720, 'Sedang'], [1080, 'Tinggi']];
 ML.previewMax = () => +(ML.lsGet('ml.pv') || 480);
 

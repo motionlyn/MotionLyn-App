@@ -8,6 +8,8 @@
 (function () {
 /* Skala: di MotionLyn 100% = 1.0 di AM dikali SCALE_K (AM 1.0 tampil setengah di MotionLyn, jadi impor x2 dan ekspor /2). */
 const SCALE_K = 2;
+/* nama blending AM -> id blend MotionLyn */
+const BLEND_MAP = { exclude: 'exclusion', exclusion: 'exclusion', darken: 'darken', lighten: 'lighten', screen: 'screen', multiply: 'multiply', overlay: 'overlay', add: 'add', difference: 'difference', colordodge: 'colordodge', colorburn: 'colorburn', hardlight: 'hardlight', softlight: 'softlight', hue: 'hue', saturation: 'saturation', color: 'color', luminosity: 'luminosity', normal: 'normal' };
 const AMVER = { amver: '1028425', ffver: '106', am: 'com.alightcreative.motion/5.0.273.1028425' };
 const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const f6 = n => (isFinite(n) ? +n : 0).toFixed(6);
@@ -262,6 +264,8 @@ function readXf(el, W, H) {
   const scv = q => { const v = vec(q); return v && [v[0] * 100, (v.length > 1 ? v[1] : v[0]) * 100]; };
   const par = el.getAttribute('parent') || null, loc = animIn(sub('location'), dur, vec, 2, par ? [0, 0] : [W / 2, H / 2]), sc = animIn(sub('scale'), dur, scv, 2, [100, 100]);
   const ro = animIn(sub('rotation'), dur, one, 1, [0]), op = animIn(sub('opacity'), dur, q => { const v = one(q); return v && [v[0] * 100]; }, 1, [100]);
+  const off = (el.getAttribute('ml-off') || '').split(',').map(Number); // isi scene bersarang: lokasi AM absolut di kanvas scene -> relatif terhadap tengah scene
+  if (off.length === 2 && off.every(isFinite) && sub('location')) [0, 1].forEach(i => { loc[i].v -= off[i]; (loc[i].k || []).forEach(q => { q.v -= off[i]; }); });
   return { id: el.getAttribute('id'), parent: el.getAttribute('parent') || null, start: st, dur, loc, sc, ro, op };
 }
 const keyed = N => [].concat(N.loc, N.sc, N.ro).some(a => a.k.length);
@@ -308,6 +312,23 @@ function bakeChain(Ly, N, nodes, W, H) {
     if (Math.max(...vs) - Math.min(...vs) < 1e-6) { Ly.p[nm] = { v: vs[0], k: [] }; return; } // kanal tak berubah: tanpa keyframe
     Ly.p[nm] = { v: vs[0], k: all.map((t, i) => ({ t, v: vs[i], e: i + 1 < all.length ? LIN : null })) };
   });
+}
+
+/** Opacity grup AM berlaku ke semua isinya: kalikan ke opacity layer (statis: skala nilai; beranimasi: disampel linear). */
+function composeGroupOpacity(Ly, N, nodes) {
+  const gs = [], seen = new Set([N.id]); let q = N.parent && nodes.get(N.parent);
+  while (q && !seen.has(q.id)) { if (q.group) gs.push(q); seen.add(q.id); q = q.parent && nodes.get(q.parent); }
+  if (!gs.length) return;
+  const op = Ly.p.op, animated = [op].concat(gs.map(g => g.op[0])).some(a => a.k && a.k.length);
+  if (!animated) { const f = gs.reduce((m, g) => m * g.op[0].v / 100, 1); if (Math.abs(f - 1) < 1e-6) return; op.v *= f; return; }
+  const LIN = [0, 0, 1, 1], ts = new Set([0, Ly.dur]);
+  const addKeys = (a, off) => (a.k || []).forEach(k => { const t = k.t + off; if (t > 0 && t < Ly.dur) ts.add(+t.toFixed(6)); });
+  addKeys(op, 0); gs.forEach(g => addKeys(g.op[0], g.start - Ly.start));
+  const base = [...ts].sort((a, b) => a - b), all = new Set(base);
+  base.forEach((t, i) => { if (i + 1 < base.length) for (const f of [0.25, 0.5, 0.75]) all.add(+(t + (base[i + 1] - t) * f).toFixed(6)); });
+  const arr = [...all].sort((a, b) => a - b), val = t => gs.reduce((m, g) => m * ML.evalAnim(g.op[0], t + Ly.start - g.start) / 100, ML.evalAnim(op, t));
+  const vs = arr.map(val);
+  Ly.p.op = { v: vs[0], k: arr.map((t, i) => ({ t, v: vs[i], e: i + 1 < arr.length ? LIN : null })) };
 }
 
 /** Gabungkan induk ke layer anak SECARA ANALITIK bila bisa: keyframe + kurva easing induk disalin apa adanya (jumlah keyframe & kurva sama dengan AM).
@@ -360,7 +381,7 @@ ML.importAMXML = async files => {
   if (!root || root.nodeName === 'parsererror' || doc.getElementsByTagName('parsererror').length) throw new Error('XML tidak valid');
   if (root.nodeName !== 'scene') throw new Error('Bukan proyek Alight Motion (elemen <scene> tidak ada)');
   await waitXml();
-  const pool = await collectFiles(files), rep = { layers: 0, missingMedia: [], fxSkipped: [], skipped: [], parentNote: 0, shapeUnknown: 0, name: '' };
+  const pool = await collectFiles(files), rep = { layers: 0, missingMedia: [], fxSkipped: [], fxApprox: [], skipped: [], groups: [], parentNote: 0, shapeUnknown: 0, name: '' };
   const W = Math.max(2, Math.round(num(root.getAttribute('width'), 1080))), H = Math.max(2, Math.round(num(root.getAttribute('height'), 1920)));
   const g = (a, b) => b ? g(b, a % b) : a, gg = g(W, H);
   const bgc = parseColor(root.getAttribute('bgcolor') || '#ff000000');
@@ -369,7 +390,31 @@ ML.importAMXML = async files => {
     fps: Math.max(1, Math.round(num(root.getAttribute('fps'), 30))), ratio: (W / gg) + ':' + (H / gg), resLabel: Math.min(W, H) + 'p', bg: bgc.a === 0 ? 'transparent' : hexOf(bgc),
     markers: [], layers: [], thumb: null, size: 0, dur: 0 };
   rep.name = proj.name;
-  const kids = [...root.children];
+  const LAYER_TAGS = ['audio', 'shape', 'text', 'video', 'image', 'nullobj', 'group', 'embedScene'];
+  const kids = []; // daftar datar. <group> berisi layer, dan <embedScene> (= "Group" di AM: scene bersarang dengan kanvas sendiri) diratakan:
+  // isinya diangkat ke linimasa utama, berinduk ke grupnya; id diberi awalan agar unik; waktu digeser ke awal grup; lokasi dihitung dari tengah kanvas scene.
+  const shiftT = (e, t0) => { if (!t0) return; ['startTime', 'endTime'].forEach(k => { if (e.getAttribute(k) != null) e.setAttribute(k, String(Math.round(num(e.getAttribute(k), 0) + t0))); }); };
+  const expand = (list, ctx) => {
+    for (const e of list) {
+      const tg = e.nodeName, isL = LAYER_TAGS.includes(tg);
+      if (isL) {
+        if (ctx.pre && e.getAttribute('id') != null) e.setAttribute('id', ctx.pre + ':' + e.getAttribute('id')); // id unik per scene
+        const pa = e.getAttribute('parent');
+        if (pa && ctx.pre) e.setAttribute('parent', ctx.pre + ':' + pa);
+        else if (!pa && ctx.pid && e.getAttribute('id') != null) e.setAttribute('parent', ctx.pid); // isi <group> lama: berinduk ke grupnya
+        if (ctx.gid) e.setAttribute('gid', ctx.gid); // layer di dalam <embedScene> (Group AM) = anak layer grup
+        shiftT(e, ctx.t0); if (ctx.hidden) e.setAttribute('hidden', 'true');
+      }
+      kids.push(e);
+      if (tg === 'group') expand([...e.children].filter(c => LAYER_TAGS.includes(c.nodeName)), { pid: e.getAttribute('id'), pre: ctx.pre, gid: ctx.gid, t0: ctx.t0, hidden: ctx.hidden || e.getAttribute('hidden') === 'true' });
+      else if (tg === 'embedScene') {
+        const sc = [...e.children].find(c => c.nodeName === 'scene'); if (!sc) continue;
+        const id = e.getAttribute('id');
+        expand([...sc.children].filter(c => LAYER_TAGS.includes(c.nodeName) || c.nodeName === 'media'), { pid: null, pre: id, gid: id, t0: num(e.getAttribute('startTime'), 0), hidden: ctx.hidden || e.getAttribute('hidden') === 'true' });
+      }
+    }
+  };
+  expand([...root.children], { pid: null, pre: null, gid: null, t0: 0, hidden: false });
   const mediaInfo = new Map(); kids.filter(k => k.nodeName === 'media').forEach(m => mediaInfo.set(m.getAttribute('uri'), { file: m.getAttribute('filename') || baseName(m.getAttribute('uri')), type: m.getAttribute('type') || '', w: num(m.getAttribute('width'), 0), h: num(m.getAttribute('height'), 0) }));
   let n = 0; kids.filter(k => k.nodeName === 'bookmark').forEach(b => proj.markers.push({ id: ML.uid(), t: num(b.getAttribute('t'), 0) / 1000, name: 'Penanda ' + (++n) }));
   proj.markers.sort((a, b) => a.t - b.t);
@@ -392,13 +437,36 @@ ML.importAMXML = async files => {
     return hint || 'image';
   };
   const nodes = new Map(); // id -> transform lokal (objek null & layer) untuk rantai induk
-  for (const el of kids) { if (['media', 'bookmark'].includes(el.nodeName) || el.getAttribute('id') == null) continue; const n = readXf(el, W, H); nodes.set(n.id, n); }
+  for (const el of kids) { if (['media', 'bookmark'].includes(el.nodeName) || el.getAttribute('id') == null) continue; const n = readXf(el, W, H); n.group = el.nodeName === 'group'; if (n.group) { n.fxEls = [...el.children].filter(c => c.nodeName === 'effect'); n.label = el.getAttribute('label') || el.nodeName; } nodes.set(n.id, n); }
 
+  /** bangun satu efek MotionLyn dari elemen <effect> AM. fdur = durasi pemilik efek (untuk skala kunci), shift = geseran waktu ke linimasa layer. null bila tak punya padanan. */
+  const fxFrom = (fe, fdur, shift) => {
+    const amId = fe.getAttribute('id'), key = ML.XML_ID && ML.XML_ID[amId];
+    if (!key || !ML.FXDEF[key]) return { skip: amId.replace('com.alightcreative.effects.', '') };
+    const e = ML.makeEffect(key), d = ML.FXDEF[key], moved = [];
+    const A1 = (pe, cnt, defs, conv) => { const a = animIn(pe, fdur, conv, cnt, defs); a.forEach(x => moved.push(x)); return a; };
+    for (const pe of [...fe.children].filter(c => c.nodeName === 'property')) {
+      const pm = (d.pmap || []).find(q => q.id === pe.getAttribute('name')); if (!pm) continue;
+      const gk = pm.g, set = (suf, a) => { e.p[gk + suf] = a; };
+      if (pm.kind === 'n') e.p[gk] = A1(pe, 1, [e.p[gk].v], one)[0];
+      else if (pm.kind === 'b') e.p[gk] = ML.A(/^true$/i.test(pe.getAttribute('value')) ? 1 : 0);
+      else if (pm.kind === 's') { const ix = pm.values.indexOf(Math.round(num(pe.getAttribute('value'), pm.values[0]))); e.p[gk] = ML.A(ix < 0 ? e.p[gk].v : ix); }
+      else if (pm.kind === 'c') { const a = A1(pe, 4, [255, 255, 255, 255], colConv); set('_r', a[0]); set('_g', a[1]); set('_b', a[2]); if (pm.alpha) set('_a', a[3]); }
+      else if (pm.kind === 'p') { const a = A1(pe, 2, [0, 0], vec); set('_x', a[0]); set('_y', a[1]); }
+      else if (pm.kind === 'h') { const a = A1(pe, 3, [0, 0, 0], vec); set('_x', a[0]); set('_y', a[1]); if (pm.bias) set('_z', a[2]); }
+      else if (pm.kind === 'v3') { const a = A1(pe, 3, [0, 0, 0], vec); set('_x', a[0]); set('_y', a[1]); set('_z', a[2]); }
+    }
+    if (shift) moved.forEach(a => (a.k || []).forEach(q => { q.t += shift; }));
+    return { e };
+  };
+  const grpFxNoted = new Set(), gidMap = new Map();
   for (const el of kids) {
     const tag = el.nodeName; if (['media', 'bookmark'].includes(tag)) continue;
     const label = el.getAttribute('label') || tag, st = num(el.getAttribute('startTime'), 0) / 1000, en = num(el.getAttribute('endTime'), 0) / 1000, dur = Math.max(0.05, en - st);
     if (tag === 'nullobj') continue;
-    if (!['audio', 'shape', 'text', 'video', 'image'].includes(tag)) { rep.skipped.push(label + ' (<' + tag + '>)'); continue; }
+    if (tag === 'group') { rep.groups.push(label); continue; }
+    if (tag === 'embedScene') rep.groups.push(label);
+    if (!['audio', 'shape', 'text', 'video', 'image', 'embedScene'].includes(tag)) { rep.skipped.push(label + ' (<' + tag + '>)'); continue; }
     const ND = nodes.get(el.getAttribute('id')) || readXf(el, W, H);
     const ft = el.getAttribute('fillType');
     let type, it = null, bw = 0, bh = 0, phUri = null, phHint = null;
@@ -407,14 +475,18 @@ ML.importAMXML = async files => {
     if (tag === 'audio') { phUri = el.getAttribute('src'); phHint = 'audio'; it = await mediaFor(phUri); type = it ? 'audio' : 'shape'; }
     else if (tag === 'video' || tag === 'image') { phUri = el.getAttribute('src') || el.getAttribute('fillImage'); phHint = tag; it = await mediaFor(phUri); type = it ? (it.kind === 'video' ? 'video' : it.kind === 'audio' ? 'audio' : 'image') : 'shape'; }
     else if (tag === 'text') type = 'text';
+    else if (tag === 'embedScene') { type = 'group'; const sc0 = [...el.children].find(c => c.nodeName === 'scene'); bw = num(sc0 && sc0.getAttribute('width'), W); bh = num(sc0 && sc0.getAttribute('height'), H); }
     else if (ft === 'media') { phUri = el.getAttribute('fillImage'); it = await mediaFor(phUri); if (it && it.kind !== 'image') it = keepShape ? null : it; type = keepShape ? 'shape' : it ? (it.kind === 'video' ? 'video' : it.kind === 'audio' ? 'audio' : 'image') : 'shape'; }
     else type = 'shape';
     const isPh = !!phUri && !it, phInfo = isPh ? (mediaInfo.get(phUri) || {}) : null;
-    const sz = sizeEl ? nums(sizeEl.getAttribute('value')) : null;
+    const sz = sizeEl && tag !== 'embedScene' ? nums(sizeEl.getAttribute('value')) : null;
     if (sz && sz.length >= 2) { bw = sz[0]; bh = sz[1]; } else if (it && it.w) { [bw, bh] = ML.fitBox(it.w, it.h, proj); }
     else if (isPh && phInfo.w && phInfo.h) { [bw, bh] = ML.fitBox(phInfo.w, phInfo.h, proj); }
     const Ly = ML.makeLayer(proj, type, { name: label, mediaId: it ? it.id : null, start: st, dur, bw, bh, srcDur: it ? it.dur || 0 : 0 });
     Ly.dur = dur; Ly.start = st; Ly.name = label; if (el.getAttribute('hidden') === 'true') Ly.hidden = true;
+    if (type === 'group') gidMap.set(el.getAttribute('id'), Ly.id);
+    if (el.getAttribute('gid')) Ly.gid = gidMap.get(el.getAttribute('gid')) || null;
+    { const bl = el.getAttribute('blending'); if (bl) { Ly.blend = BLEND_MAP[bl] || (ML.BLENDS.some(b => b[0] === bl) ? bl : 'normal'); if (!BLEND_MAP[bl] && Ly.blend === 'normal') rep.fxApprox.push('blending “' + bl + '” → Normal — ' + label); } }
     if (it && ft === 'media' && tag === 'shape' && type === 'image' && bw > 0 && bh > 0 && it.w && it.h) { // AM: gambar mengisi bentuk (dipotong) / pas, tidak dirangkang
       const mf = el.getAttribute('mediaFillMode') || 'fill';
       if (mf !== 'stretch') { const sc = (mf === 'fit' ? Math.min : Math.max)(bw / it.w, bh / it.h); Ly.bw = it.w * sc; Ly.bh = it.h * sc; if (mf !== 'fit') Ly.frame = { w: bw, h: bh }; }
@@ -444,26 +516,26 @@ ML.importAMXML = async files => {
     }
     // transform (lokal) + rantai induk
     Ly.p.x = ND.loc[0]; Ly.p.y = ND.loc[1]; Ly.p.sx = ND.sc[0]; Ly.p.sy = ND.sc[1]; Ly.p.rot = ND.ro[0]; Ly.p.op = ND.op[0];
-    if (ND.parent && nodes.has(ND.parent)) { composeParent(Ly, ND, nodes, W, H); if (ancestorMoves(ND, nodes, W, H)) rep.parentNote++; }
-    ['sx', 'sy'].forEach(k => { const a = Ly.p[k]; a.v *= SCALE_K; (a.k || []).forEach(q => { q.v *= SCALE_K; }); }); // ukuran AM -> MotionLyn (x2)
-    // efek
+    if (ND.parent && nodes.has(ND.parent)) { composeParent(Ly, ND, nodes, W, H); if (ancestorMoves(ND, nodes, W, H)) rep.parentNote++; composeGroupOpacity(Ly, ND, nodes); }
+    { const K = type === 'group' ? 1 : SCALE_K; ['sx', 'sy'].forEach(k => { const a = Ly.p[k]; a.v *= K; (a.k || []).forEach(q => { q.v *= K; }); }); } // ukuran bentuk AM -> MotionLyn (x2); layer grup memakai ukuran scene apa adanya
+    // efek milik layer sendiri
     for (const fe of [...el.children].filter(c => c.nodeName === 'effect')) {
-      const amId = fe.getAttribute('id'), key = ML.XML_ID && ML.XML_ID[amId];
-      if (!key || !ML.FXDEF[key]) { rep.fxSkipped.push(amId.replace('com.alightcreative.effects.', '') + ' — ' + label); continue; }
-      const e = ML.makeEffect(key), d = ML.FXDEF[key];
-      for (const pe of [...fe.children].filter(c => c.nodeName === 'property')) {
-        const pm = (d.pmap || []).find(q => q.id === pe.getAttribute('name')); if (!pm) continue;
-        const gk = pm.g, set = (suf, a) => { e.p[gk + suf] = a; };
-        if (pm.kind === 'n') e.p[gk] = animIn(pe, dur, one, 1, [e.p[gk].v])[0];
-        else if (pm.kind === 'b') e.p[gk] = ML.A(/^true$/i.test(pe.getAttribute('value')) ? 1 : 0);
-        else if (pm.kind === 's') { const ix = pm.values.indexOf(Math.round(num(pe.getAttribute('value'), pm.values[0]))); e.p[gk] = ML.A(ix < 0 ? e.p[gk].v : ix); }
-        else if (pm.kind === 'c') { const a = animIn(pe, dur, colConv, 4, [255, 255, 255, 255]); set('_r', a[0]); set('_g', a[1]); set('_b', a[2]); if (pm.alpha) set('_a', a[3]); }
-        else if (pm.kind === 'p') { const a = animIn(pe, dur, vec, 2, [0, 0]); set('_x', a[0]); set('_y', a[1]); }
-        else if (pm.kind === 'h') { const a = animIn(pe, dur, vec, 3, [0, 0, 0]); set('_x', a[0]); set('_y', a[1]); if (pm.bias) set('_z', a[2]); }
-        else if (pm.kind === 'v3') { const a = animIn(pe, dur, vec, 3, [0, 0, 0]); set('_x', a[0]); set('_y', a[1]); set('_z', a[2]); }
-      }
-      Ly.fx.push(e);
+      if (fe.getAttribute('hidden') === 'true') continue; // efek dimatikan di AM
+      const r = fxFrom(fe, dur, 0);
+      if (r.skip) rep.fxSkipped.push(r.skip + ' — ' + label); else Ly.fx.push(r.e);
     }
+    // efek milik GRUP: MotionLyn belum punya layer grup, jadi efek grup diterapkan ke tiap layer di dalamnya (setelah efek layer itu sendiri)
+    { const seenG = new Set(); let q = ND.parent && nodes.get(ND.parent);
+      while (q && !seenG.has(q.id)) {
+        seenG.add(q.id);
+        if (q.group && q.fxEls && q.fxEls.length) for (const fe of q.fxEls) {
+          if (fe.getAttribute('hidden') === 'true') continue;
+          const r = fxFrom(fe, q.dur, q.start - ND.start), nk = q.id + '|' + fe.getAttribute('id');
+          if (r.skip) { if (!grpFxNoted.has(nk)) { grpFxNoted.add(nk); rep.fxSkipped.push(r.skip + ' — grup ' + q.label); } }
+          else { Ly.fx.push(r.e); if (!grpFxNoted.has(nk)) { grpFxNoted.add(nk); rep.fxApprox.push(((ML.FXDEF[r.e.type] && ML.FXDEF[r.e.type].name) || r.e.type).split(' (')[0] + ' — diterapkan ke tiap layer di grup ' + q.label); } }
+        }
+        q = q.parent && nodes.get(q.parent);
+      } }
     proj.layers.push(Ly); rep.layers++;
   }
   proj.dur = ML.duration(proj); proj.size = size + JSON.stringify(proj.layers).length;
@@ -474,7 +546,7 @@ ML.importAMXML = async files => {
 };
 
 /* ================= UI ================= */
-const lines = (arr, max = 8) => arr.slice(0, max).map(x => '• ' + x).join('<br>') + (arr.length > max ? '<br>… +' + (arr.length - max) + ' lagi' : '');
+const lines = (arr, max = 8) => arr.slice(0, max).map(x => '• ' + esc(x)).join('<br>') + (arr.length > max ? '<br>… +' + (arr.length - max) + ' lagi' : '');
 ML.amReportSheet = (title, rep, imported) => {
   const parts = [];
   if (imported) parts.push('<b>' + rep.layers + ' layer</b> berhasil diimpor.');
@@ -483,6 +555,7 @@ ML.amReportSheet = (title, rep, imported) => {
   if (rep.fxSkipped && rep.fxSkipped.length) parts.push('<b>Efek dilewati (' + rep.fxSkipped.length + '):</b> tidak punya padanan efek Alight Motion' + (imported ? ' di engine MotionLyn' : '') + '.<br>' + lines(rep.fxSkipped));
   if (rep.fxApprox && rep.fxApprox.length) parts.push('<b>Efek dipetakan perkiraan (' + rep.fxApprox.length + '):</b> padanan AM-nya mirip, tapi tampilannya bisa sedikit beda.<br>' + lines(rep.fxApprox));
   if (rep.skipped && rep.skipped.length) parts.push('<b>Layer dilewati (' + rep.skipped.length + '):</b><br>' + lines(rep.skipped));
+  if (rep.groups && rep.groups.length) parts.push('<b>Grup (' + rep.groups.length + '):</b> grup AM (scene bersarang) dibuat sebagai <b>layer grup</b>: isinya dirender terpisah, jadi blend/mask di dalam grup hanya memengaruhi isi grup itu, dan efek/transform grup berlaku ke seluruh isinya.<br>' + lines(rep.groups));
   if (rep.parentNote) parts.push(rep.parentNote + ' layer berinduk ke objek null yang bergerak: gerakan induk dibakar ke keyframe tiap layer (MotionLyn belum punya parenting).');
   if (rep.shapeUnknown) parts.push(rep.shapeUnknown + ' bentuk khusus AM diganti persegi.');
   if (!imported && rep.media && rep.media.length) parts.push('Alamat media di XML bersifat lokal perangkat; di Alight Motion hubungkan ulang medianya bila diminta.');
@@ -500,7 +573,7 @@ ML.amImportUi = async () => {
     const rep = await ML.importAMXML(files);
     if (ML.editVer() !== 'am') { ML.setEditVer('am'); }
     if (ML.home && ML.home.show) await ML.home.show();
-    const bad = rep.missingMedia.length || rep.fxSkipped.length || rep.skipped.length || rep.shapeUnknown;
+    const bad = rep.missingMedia.length || rep.fxSkipped.length || rep.skipped.length || rep.shapeUnknown || (rep.groups && rep.groups.length);
     ML.toast('Proyek “' + rep.name + '” diimpor (mode AM aktif)' + (rep.parentNote ? ', ' + rep.parentNote + ' layer dibakar dari induk' : ''));
     if (bad) { ML.amReportSheet('Hasil impor XML', rep, true); } else ML.openEditor(rep.id);
     ML.amLast = rep.id;

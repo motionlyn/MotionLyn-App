@@ -46,8 +46,8 @@ ML.textCanvas = function (L) {
 };
 
 ML.Renderer = class {
-  constructor() { this.fx = new ML.FX(); this.lc = mkCv(); this.ac = mkCv(); this.maxSamples = 6; }
-  dispose() { this.fx.dispose(); }
+  constructor(fx) { this.fx = fx || new ML.FX(); this.ownFx = !fx; this.lc = mkCv(); this.ac = mkCv(); this.maxSamples = 6; }
+  dispose() { if (this.ownFx) this.fx.dispose(); if (this.sr) this.sr.dispose(); }
   size(W, H) { [this.lc, this.ac].forEach(c => { if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } }); }
 
   render(target, proj, t, opts = {}) {
@@ -56,10 +56,16 @@ ML.Renderer = class {
     const ctx = target.getContext('2d');
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     if (proj.bg === 'transparent') { ctx.clearRect(0, 0, W, H); if (opts.checker || ML.exportChecker) ML.drawChecker(ctx, W, H); } else { ctx.fillStyle = proj.bg; ctx.fillRect(0, 0, W, H); }
+    const rg = opts.rootGid || null; // layer ber-gid dirender di dalam grupnya; rootGid = grup yang sedang dirender / dibuka di editor
+    // MASK: bila ada layer bermode mask dan latar tidak transparan, tumpukan layer digambar di kanvas transparan dulu agar mask tidak ikut menghapus latar
+    const useStack = proj.bg !== 'transparent' && proj.layers.some(L => (L.gid || null) === rg && !L.hidden && /^mask_/.test(L.blend || ''));
+    let dc = ctx, sk = null;
+    if (useStack) { sk = this.sk || (this.sk = mkCv()); if (sk.width !== W || sk.height !== H) { sk.width = W; sk.height = H; } dc = sk.getContext('2d'); dc.setTransform(1, 0, 0, 1, 0, 0); dc.globalAlpha = 1; dc.globalCompositeOperation = 'source-over'; dc.clearRect(0, 0, W, H); }
     for (const L of proj.layers) {
-      if (L.hidden || L.k3 || L.type === 'audio' || t < L.start || t >= L.start + L.dur) continue;
-      this.layer(target, ctx, proj, L, t, s);
+      if (L.hidden || L.k3 || L.type === 'audio' || (L.gid || null) !== rg || t < L.start || t >= L.start + L.dur) continue;
+      this.layer(target, dc, proj, L, t, s);
     }
+    if (sk) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.drawImage(sk, 0, 0); }
   }
 
   /** matriks layer (px kanvas) + ukuran layer, dipakai efek yang butuh batas layer (Ubin V3) */
@@ -68,6 +74,21 @@ ML.Renderer = class {
     let V = [0, 0, 0, 0];
     try { const P = ML.player && ML.player.proj, fp = (P && P.fps) || 30, g0 = ML.geom(L, tt - 1 / fp); V = [(g.x - g0.x) * s, (g.y - g0.y) * s, ((g.sx + g.sy) - (g0.sx + g0.sy)) / 2, (g.rot - g0.rot) * 180 / Math.PI]; } catch (e) { /* tanpa kecepatan */ }
     return { A: [c * sx - n * ky * sx, n * sx + c * ky * sx, c * kx * sy - n * sy, n * kx * sy + c * sy], T: [g.x * s, g.y * s], Z: [Math.max(1, g.w || 1), Math.max(1, g.h || 1)], V };
+  }
+
+  /** v3.85: render isi layer UTUH di ruang-layer (tanpa terpotong layar) untuk efek Tiles; titik tengah memperhitungkan anchor.
+   *  Hasil: geo.ls (kanvas) + geo.lsT (pusat kotak layer di layar). Dilewati bila layer berputar 3D (pakai jalur layar biasa). */
+  layerSpaceSrc(proj, L, lt, s, vals, geo) {
+    const g = ML.geom(L, L.start + lt), bw = Math.abs(L.bw || 0), bh = Math.abs(L.bh || 0);
+    if (!(bw > 0 && bh > 0) || g.rx3 || g.ry3) return;
+    const zoom = Math.max(1, +(vals && vals.scale) || 1);
+    const q = Math.min(4, 2048 / Math.max(bw, bh), Math.max(.2, s * Math.max(Math.abs(g.sx), Math.abs(g.sy)) * zoom)), cw = Math.max(2, Math.ceil(bw * q)), ch = Math.max(2, Math.ceil(bh * q));
+    const cv = this.lsc || (this.lsc = mkCv()); if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+    const tx = cv.getContext('2d'); tx.setTransform(1, 0, 0, 1, 0, 0); tx.globalAlpha = 1; tx.globalCompositeOperation = 'source-over'; tx.clearRect(0, 0, cw, ch);
+    tx.setTransform(cw / bw, 0, 0, ch / bh, cw / 2, ch / 2);
+    const sa = ML.fxAdj; try { this.content(tx, proj, L, lt, s, true); } finally { ML.fxAdj = sa; tx.setTransform(1, 0, 0, 1, 0, 0); }
+    const A = geo.A, ax = g.ax || 0, ay = g.ay || 0;
+    geo.ls = cv; geo.lsT = [geo.T[0] - (A[0] * ax + A[2] * ay), geo.T[1] - (A[1] * ax + A[3] * ay)];
   }
 
   vals(e, lt) { const o = {}; for (const k in e.p) o[k] = ML.evalAnim(e.p[k], lt); return o; }
@@ -92,7 +113,9 @@ ML.Renderer = class {
           lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalAlpha = 1; lc.globalCompositeOperation = 'source-over'; lc.clearRect(0, 0, W, H);
           this.content(lc, proj, L, ltt, s);
           const passes = chain.map(e => ({ type: e.type, vals: this.vals(e, ltt) }));
-          out.drawImage(this.fx.run(this.lc, target, passes, ltt, this.fxGeo(L, tt, s)), 0, 0);
+          const geo = this.fxGeo(L, tt, s), d0 = ML.FXDEF[chain[0].type];
+          if (d0.layerSpace && !L.k3) this.layerSpaceSrc(proj, L, ltt, s, passes[0].vals, geo);
+          out.drawImage(this.fx.run(this.lc, target, passes, ltt, geo), 0, 0);
         }
       } finally { ML.fxAdj = null; ML.fxCtx = null; }
       out.globalAlpha = 1; out.globalCompositeOperation = 'source-over';
@@ -107,6 +130,24 @@ ML.Renderer = class {
       ctx.globalAlpha = op; ctx.globalCompositeOperation = blend; ctx.drawImage(this.ac, 0, 0);
       ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     } else renderAt(t, ctx, op, blend);
+  }
+
+  /** LAYER GRUP: isi grup (layer ber-gid sama) dirender terisolasi ke kanvas sebesar scene grup, lalu kanvas itu digambar sebagai satu layer.
+   *  Blend/mask layer di dalam grup hanya memengaruhi isi grup itu. */
+  groupCanvas(proj, L, tt, s, g) {
+    const ids = new Set([L.id]); let grew = true; // seluruh keturunan grup (anak, cucu, ...), supaya grup di dalam grup ikut terisi
+    while (grew) { grew = false; for (const k of proj.layers) if (k.gid && ids.has(k.gid) && !ids.has(k.id)) { ids.add(k.id); grew = true; } }
+    ids.delete(L.id);
+    const kids = proj.layers.filter(k => ids.has(k.id)), iw = Math.max(1, L.bw || 1), ih = Math.max(1, L.bh || 1);
+    if (!kids.length) return null;
+    const q = Math.min(2, Math.max(0.1, s * Math.max(Math.abs(g.sx || 1), Math.abs(g.sy || 1))), 2048 / Math.max(iw, ih));
+    const cw = Math.max(2, Math.round(iw * q)), ch = Math.max(2, Math.round(ih * q));
+    const gm = this.gcv || (this.gcv = new WeakMap()); let cv = gm.get(L); if (!cv) { cv = mkCv(); gm.set(L, cv); }
+    if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+    const sub = { w: iw, h: ih, fps: proj.fps, dur: proj.dur, bg: 'transparent', layers: kids };
+    const r = this.sr || (this.sr = new ML.Renderer(this.fx)), sa = ML.fxAdj, sc = ML.fxCtx;
+    try { r.render(cv, sub, tt, { maxSamples: this.maxSamples, rootGid: L.id }); } finally { ML.fxAdj = sa; ML.fxCtx = sc; }
+    return cv;
   }
 
   /** gambar isi layer (tanpa efek) dengan transform pada waktu-lokal lt */
@@ -168,6 +209,7 @@ ML.Renderer = class {
       const v = ML.media.el(L);
       if (v && v.readyState >= 2 && v.videoWidth) { if (L.frame) { ctx.beginPath(); ctx.rect(-L.frame.w / 2, -L.frame.h / 2, L.frame.w, L.frame.h); ctx.clip(); } ctx.drawImage(v, -L.bw / 2, -L.bh / 2, L.bw, L.bh); }
     } else if (L.type === 'text') { const c = ML.textCanvas(L); ctx.drawImage(c, -c.width / 2, -c.height / 2); }
+    else if (L.type === 'group') { const c = this.groupCanvas(proj, L, lt + L.start, s, g); if (c) ctx.drawImage(c, -L.bw / 2, -L.bh / 2, L.bw, L.bh); }
     else if (L.glb) { const c = ML.glbCanvas(L, lt); if (c) ctx.drawImage(c, -L.bw / 2, -L.bh / 2, L.bw, L.bh); }
     else if (L.type === 'shape') {
       const sh = L.shape, p = shapePath(sh, L.bw, L.bh);

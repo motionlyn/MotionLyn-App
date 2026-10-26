@@ -176,7 +176,7 @@ ML.FX = class {
     if (!vs || !fs) return (this.progs[key] = null);
     const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, fs); gl.bindAttribLocation(p, 0, 'a'); gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { console.error(key, gl.getProgramInfoLog(p)); return (this.progs[key] = null); }
-    const loc = {}, ex = ['u_pass', 'u_orient', 'u_V'];
+    const loc = {}, ex = ['u_pass', 'u_orient', 'u_V', 'u_ls'];
     (d.bufs || []).forEach(b => ex.push('u_b_' + b.id, 'u_bs_' + b.id)); (d.imgs || []).forEach(b => ex.push('u_i_' + b.id, 'u_is_' + b.id));
     ['u_tex', 'u_bg', 'u_res', 'u_time', 'u_flip', 'u_A', 'u_T', 'u_Lz'].concat(ex, d.params.map(q => 'u_' + q.k)).forEach(n => loc[n] = gl.getUniformLocation(p, n));
     return (this.progs[key] = { p, loc });
@@ -237,7 +237,7 @@ ML.FX = class {
         const l = pr.loc['u_i_' + b.id], t = this.imgTex(b.src); gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, t.t);
         if (l) gl.uniform1i(l, u); const ls = pr.loc['u_is_' + b.id]; if (ls) gl.uniform2f(ls, t.w, t.h); u++;
       });
-      gl.uniform1f(pr.loc.u_pass, k);
+      gl.uniform1f(pr.loc.u_pass, k); gl.uniform1f(pr.loc.u_ls, geo && geo.lsOn && !depth ? 1 : 0);
       gl.uniform2f(pr.loc.u_res, w, h); gl.uniform1f(pr.loc.u_time, time); gl.uniform1f(pr.loc.u_flip, B ? -1 : out.flip);
       const G = geo || { A: [1, 0, 0, 1], T: [w / 2, h / 2], Z: [w, h] };
       gl.uniform4f(pr.loc.u_A, G.A[0], G.A[1], G.A[2], G.A[3]); gl.uniform2f(pr.loc.u_T, G.T[0], G.T[1]); gl.uniform2f(pr.loc.u_Lz, G.Z[0], G.Z[1]);
@@ -262,11 +262,20 @@ ML.FX = class {
     }
     gl.viewport(0, 0, w, h); gl.disable(gl.BLEND);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    let cur = this.src;
+    let cur = this.src, lsGeo = null;
+    { /* sumber ruang-layer (Tiles): dipakai bila efek pertama memintanya dan renderer menyediakan kanvasnya */
+      const d0 = passes[0] && ML.FXDEF[passes[0].type];
+      if (d0 && d0.layerSpace && geo && geo.ls && geo.ls.width > 1) {
+        if (!this.lsTex) this.lsTex = this.tex();
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.lsTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, geo.ls);
+        cur = this.lsTex; lsGeo = Object.assign({}, geo, { T: geo.lsT || geo.T, lsOn: true });
+      }
+    }
     if (!passes.length) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); return this.cv; }
     passes.forEach((ps, i) => {
       const last = i === passes.length - 1, tgt = last ? null : this.fb[i % 2];
-      this.exec(ps.type, ps.vals, cur, tgt ? { f: tgt.f, w, h, flip: -1 } : { f: null, w, h, flip: 1 }, time, geo, w, h, 0, ps.groups);
+      this.exec(ps.type, ps.vals, cur, tgt ? { f: tgt.f, w, h, flip: -1 } : { f: null, w, h, flip: 1 }, time, (i === 0 && lsGeo) || geo, w, h, 0, ps.groups);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.buf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
       if (tgt) cur = tgt.t;
     });

@@ -20,7 +20,9 @@ ML.settings = (() => {
         row('Durasi Layer Bawaan', sel, 'b'),
         h('div', { class: 'lbl', text: 'Pengambilan Ulang Audio (ekspor)' }),
         seg([[22050, 'RENDAH'], [44100, 'TINGGI'], [48000, 'ULTRA']], () => +(ML.lsGet('ml.asr') || 48000), v => ML.lsSet('ml.asr', v)),
-        h('div', { class: 'lbl', text: 'Tema' }), seg([['light', 'CERAH'], ['dark', 'GELAP']], () => ML.themeNow(), v => ML.setTheme(v))),
+        h('div', { class: 'lbl', text: 'Tema' }), seg([['light', 'CERAH'], ['dark', 'GELAP']], () => ML.themeNow(), v => ML.setTheme(v)),
+        h('div', { class: 'lbl', text: 'Ukuran UI' }), seg([['compact', 'RINGKAS'], ['normal', 'NORMAL']], () => ML.densityNow(), v => ML.setDensity(v)),
+        h('div', { class: 'lbl', text: 'Tampilan editor' }), seg([['mobile', 'MOBILE'], ['desk', 'DESKTOP']], () => ML.uiMode(), v => ML.setUi(v))),
       h('div', { class: 'dr-card' }, link('Tentang', () => { close(); ML.guide(); })),
       h('div', { class: 'dr-card' }, link('Dapatkan Dukungan', () => window.open(WA, '_blank'))),
       h('div', { class: 'dr-card' }, h('div', { class: 'lbl', text: 'Ikuti kami' }), link('WhatsApp Channel', () => window.open(WA, '_blank'))));

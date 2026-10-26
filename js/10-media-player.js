@@ -178,7 +178,7 @@ ML.media = {
 
 /* ---------- pemutar ---------- */
 ML.player = {
-  proj: null, t: 0, playing: false, raf: 0, onframe: null, onend: null, onstate: null,
+  proj: null, t: 0, playing: false, loop: false, raf: 0, onframe: null, onend: null, onstate: null, // loop: putar ulang terus (tombol play ditahan)
   init(proj) { this.proj = proj; this.t = 0; this.playing = false; },
   dur() { return ML.duration(this.proj); },
   seek(t) { this.t = ML.clamp(t, 0, this.dur()); if (!this.playing) { this.syncMedia(false); this.redraw(); } else { this.t0 = this.t; this.ts = performance.now(); } },
@@ -201,6 +201,7 @@ ML.player = {
     this.t = this.t0 + (performance.now() - this.ts) / 1000;
     const d = this.dur();
     if (this.t >= d) {
+      if (this.loop && !ML.exporting) { this.t = 0; this.t0 = 0; this.ts = performance.now(); this.syncMedia(true); this.draw(); this.raf = requestAnimationFrame(() => this.tick()); return; }
       this.t = d; this.playing = false; this.pauseAll(); this.draw();
       if (this.onstate) this.onstate(false); if (this.onend) this.onend(); return;
     }

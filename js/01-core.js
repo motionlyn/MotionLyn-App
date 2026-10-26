@@ -1,5 +1,5 @@
 'use strict';
-window.ML = { VERSION: '0.2.5', LABEL: '0.2.5 beta · build 3.77' };
+window.ML = { VERSION: '0.2.5', LABEL: '0.2.5 beta · build 3.89' };
 (function () {
 const memLS = {};
 /* localStorage bisa melempar error (iframe/sandbox); jatuh ke memori bila tak tersedia */
@@ -7,19 +7,31 @@ ML.lsGet = k => { try { const v = localStorage.getItem(k); return v === null ? (
 ML.lsSet = (k, v) => { memLS[k] = String(v); try { localStorage.setItem(k, v); } catch (e) { /* abaikan */ } };
 
 /* tampilan editor: 'mobile' (default) atau 'desk' (layout lebar: preview + timeline di kiri, properti di kanan) */
-ML.uiMode = () => 'mobile';
+ML.uiMode = () => ML.lsGet('ml.ui') === 'desk' ? 'desk' : 'mobile';
 /* Tema: 'light' / 'dark'; kosong = ikut sistem. v3.49: CSS gelap dipicu atribut data-theme pada <html>
    (menggantikan trik mediaText yang tidak andal di semua browser). */
 ML.themeNow = () => { const v = ML.lsGet('ml.theme'); return v === 'dark' || v === 'light' ? v : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); };
+ML.densityNow = () => ML.lsGet('ml.density') === 'normal' ? 'normal' : 'compact';
+ML.setDensity = d => { ML.lsSet('ml.density', d); ML.applyTheme(); window.dispatchEvent(new Event('resize')); };
 ML.applyTheme = () => {
+  document.documentElement.setAttribute('data-density', ML.densityNow());
   const t = ML.themeNow(), de = document.documentElement;
   de.setAttribute('data-theme', t); de.style.colorScheme = t;
 };
 try { const mq = window.matchMedia && matchMedia('(prefers-color-scheme: dark)'), fn = () => { const v = ML.lsGet('ml.theme'); if (v !== 'dark' && v !== 'light') ML.applyTheme(); };
   if (mq) { if (mq.addEventListener) mq.addEventListener('change', fn); else if (mq.addListener) mq.addListener(fn); } } catch (e) { /* abaikan */ }
 ML.setTheme = t => { ML.lsSet('ml.theme', t); ML.applyTheme(); document.querySelectorAll('.ed-theme button').forEach(b => b.classList.toggle('on', b.dataset.t === ML.themeNow())); ML.toast(t === 'dark' ? 'Mode Gelap' : 'Mode Cerah', 1500); };
-ML.applyUi = () => { try { localStorage.removeItem('ml.ui'); } catch (e) { /* abaikan */ } if (document.body) document.body.classList.remove('desk'); }; /* versi aplikasi: hanya tampilan mobile */
-ML.setUi = () => {};
+ML.applyUi = () => { if (document.body) document.body.classList.toggle('desk', ML.uiMode() === 'desk'); };
+ML.setUi = m => {
+  ML.lsSet('ml.ui', m === 'desk' ? 'desk' : 'mobile'); ML.applyUi();
+  if (ML.editor && ML.editor.setUi) ML.editor.setUi();
+  document.querySelectorAll('.ed-mode button').forEach(b => b.classList.toggle('on', b.dataset.m === ML.uiMode()));
+  ML.toast(m === 'desk' ? 'Tampilan Desktop' : 'Tampilan Mobile', 1500);
+};
+ML.uiSwitch = () => {
+  const mk = (m, ic, t) => { const b = ML.h('button', { title: t, 'aria-label': t, html: ML.icon(ic), onclick: () => { if (ML.uiMode() !== m) ML.setUi(m); } }); b.dataset.m = m; if (ML.uiMode() === m) b.className = 'on'; return b; };
+  return ML.h('div', { class: 'ed-mode' }, mk('mobile', 'phone', 'Tampilan Mobile'), mk('desk', 'monitor', 'Tampilan Desktop'));
+};
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 ML.$ = $; ML.$$ = $$;

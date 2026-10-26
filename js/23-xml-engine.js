@@ -33,7 +33,7 @@ void am_init(){ vec2 Z=am_Z(); acPass=int(u_pass+.5);
   acLayerSize=vec2(length(u_A.xy)*Z.x,length(u_A.zw)*Z.y); acLayerSizeNorm=acLayerSize/u_res;
   acLayerCenter=vec2(u_T.x,u_res.y-u_T.y); acLayerCenterNorm=acLayerCenter/u_res; acLayerPivot=acLayerCenter;
   acLayerNorm=am_s2l(acScreenNorm); acVelocity=vec2(u_V.x,-u_V.y); acScaleVelocity=u_V.z; acAngularVelocity=u_V.w;
-  acTime=u_time; acShowGuides=false; acLayerToScreen=am_mat(false); acLTS=acLayerToScreen; acScreenToLayer=am_mat(true); }
+  acTime=u_time; acShowGuides=false; acLayerToScreen=(u_ls>.5)?mat4(1.):am_mat(false); acLTS=acLayerToScreen; acScreenToLayer=am_mat(true); }
 `;
 const OK_AC = new Set('acPass acScreenNorm acScreenSize acPreviewSize acProjectSize acLayerSize acLayerSizeNorm acLayerCenter acLayerCenterNorm acLayerPivot acLayerNorm acLayerToScreen acLTS acScreenToLayer acVelocity acScaleVelocity acAngularVelocity acTime acShowGuides'.split(' '));
 const RESERVED = new Set('asm class union enum typedef template this packed goto switch default inline noinline volatile public static extern external interface long short double half fixed unsigned superp input output sizeof cast namespace using'.split(' '));
@@ -73,6 +73,9 @@ function fixLoops(code) {
 
 /* ES 1.00: array lokal tidak boleh diindeks variabel biasa; bacaan arr[idx] diganti fungsi pemilih (hanya efek yang perlu) */
 const ARRAYFIX = new Set(['chromatic-zoomblur']);
+/* v3.85: efek yang mengambil isi layer dalam koordinat layer (Tiles). Sumbernya dirender utuh sebesar layer (bukan terpotong layar),
+   jadi saat layer digeser/diayun/diputar tepi layar yang kosong tetap terisi ubin. */
+const LAYERSPACE = new Set(['tile']);
 function fixArrays(code) {
   const decs = [...code.matchAll(/\b(float|int|vec2|vec3|vec4)\s+(\w+)\s*\[\s*(\d+)\s*\]\s*;/g)], fns = [];
   for (const [, ty, nm, n] of decs) {
@@ -272,11 +275,11 @@ function convert(raw, stem) {
     for (const r of ren) code = code.replace(new RegExp('\\b' + r + '\\b', 'g'), 'p_' + r);
     return code;
   };
-  const UNI = 'uniform float u_pass; uniform vec4 u_V;\n' + bufs.map(b => `uniform sampler2D u_b_${b.id}; uniform vec2 u_bs_${b.id};`).join('\n') + imgs.map(b => `uniform sampler2D u_i_${b.id}; uniform vec2 u_is_${b.id};`).join('\n') + (hasOrient ? '\nuniform mat4 u_orient;' : '') + '\n';
+  const UNI = 'uniform float u_pass; uniform vec4 u_V; uniform float u_ls;\n' + bufs.map(b => `uniform sampler2D u_b_${b.id}; uniform vec2 u_bs_${b.id};`).join('\n') + imgs.map(b => `uniform sampler2D u_i_${b.id}; uniform vec2 u_is_${b.id};`).join('\n') + (hasOrient ? '\nuniform mat4 u_orient;' : '') + '\n';
   const mkFrag = sh => { const c = xf(sh.textContent || '', false); if (c == null || !c.includes('am_main') || !c.includes('gl_FragColor')) return null; return UNI + PRE + decl.join('\n') + '\n' + c + '\nvoid main(){ am_init(); ' + init.join(' ') + ' am_main(); }'; };
   const mkVert = sh => { const c = xf(sh.textContent || '', true); if (c == null || !c.includes('am_vmain')) return null; return decl.join('\n') + '\n' + c + '\nvoid main(){ ' + init.join(' ') + ' am_vmain(); }'; };
 
-  const def = { name: '', icon: 'fx', xml: true, params: P, pmap, accOf, needsBg: hasComp, passes: seq, bufs, imgs, iter: iterG, script };
+  const def = { layerSpace: LAYERSPACE.has(stem), name: '', icon: 'fx', xml: true, params: P, pmap, accOf, needsBg: hasComp, passes: seq, bufs, imgs, iter: iterG, script };
   const grouped = frags.some(s => s.hasAttribute('group'));
   if (prop) { def.prop = true; def.special = true; }
   else if (grouped) {

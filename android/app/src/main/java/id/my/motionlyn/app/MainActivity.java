@@ -191,6 +191,9 @@ public class MainActivity extends Activity {
             try { if (saveOut != null) saveOut.write(Base64.decode(b64, Base64.DEFAULT)); } catch (Exception e) { fail(e.toString()); }
         }
         @JavascriptInterface public void end() { MainActivity.this.end(); }
+        @JavascriptInterface public void hyperOn(boolean v) { HyperNative.apply(MainActivity.this, web, true); }
+        @JavascriptInterface public void hyperOff(boolean v) { HyperNative.apply(MainActivity.this, web, false); }
+        @JavascriptInterface public void hyperBattery() { HyperNative.requestBatteryExemption(MainActivity.this); }
         @JavascriptInterface public void exitApp() { runOnUiThread(() -> finish()); }
         @JavascriptInterface public void fail(String m) { MainActivity.this.fail(m); }
     }
@@ -221,5 +224,5 @@ public class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle o) { super.onSaveInstanceState(o); web.saveState(o); }
     @Override protected void onPause() { super.onPause(); web.onPause(); }
     @Override protected void onResume() { super.onResume(); web.onResume(); }
-    @Override protected void onDestroy() { web.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { HyperNative.release(this); web.destroy(); super.onDestroy(); }
 }

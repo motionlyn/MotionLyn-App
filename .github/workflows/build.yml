@@ -40,12 +40,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MotionLyn-APK
-          path: MotionLyn-0.2.5-beta.apk
+          path: MotionLyn-0.3.5-beta.apk
 
       - name: Publikasikan ke Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.5-beta
-          name: MotionLyn 0.2.5 beta
+          tag_name: v0.3.5-beta
+          name: MotionLyn 0.3.5 beta
           prerelease: true
-          files: MotionLyn-0.2.5-beta.apk
+          files: MotionLyn-0.3.5-beta.apk

@@ -1,0 +1,8 @@
+Server AM-HUB (MIT, dari cmaisnam/alight-motion-hub) untuk MotionLyn.
+Dipakai sebagai jalur cadangan impor "Link AM" bila browser memblokir unduhan langsung.
+
+Termux / Linux / PC (butuh Node.js 16+):
+  cd tools/amhub
+  node server.js          # jalan di http://localhost:3000
+Lalu di MotionLyn: Beranda > Link AM > "Server AM-HUB" > isi http://localhost:3000
+(Bila MotionLyn dibuka dari perangkat lain, isi alamat IP perangkat yang menjalankan server, mis. http://192.168.1.5:3000.)

@@ -1,0 +1,17 @@
+{
+  "name": "alight-motion-inspector",
+  "version": "1.0.0",
+  "description": "Alight Motion Cloud Share & Package Inspector Web Application",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "alight-motion",
+    "api",
+    "inspector",
+    "cloud-functions"
+  ],
+  "author": "",
+  "license": "ISC"
+}

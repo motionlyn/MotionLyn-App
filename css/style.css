@@ -562,3 +562,17 @@ body.desk .home-top{padding-left:max(14px,calc(50% - 450px));padding-right:max(1
 .icon-btn.play{position:relative;user-select:none;-webkit-touch-callout:none}
 .icon-btn.play.loop::after{content:'↻';position:absolute;right:2px;top:2px;font-size:13px;font-weight:700;color:#ff3fb0;line-height:1}
 .pm-item.on{color:#ff8fd0;font-weight:700}
+
+/* v3.92: layar tunggu impor link AM */
+.amw-spin{width:34px;height:34px;border-radius:50%;border:4px solid #d3d6e3;border-top-color:var(--mint);animation:amwspin .9s linear infinite;margin:8px auto 10px}
+@keyframes amwspin{to{transform:rotate(360deg)}}
+.amw-steps{margin:10px 0 4px;padding:0 6px}
+.amw-step{font-size:14px;color:#8a8fa8;padding:3px 0 3px 24px;position:relative}
+.amw-step:before{content:'\25CB';position:absolute;left:2px}
+.amw-step.now{color:#3d4259;font-weight:600}.amw-step.now:before{content:'\25CF';color:var(--mint)}
+.amw-step.done{color:#3d4259}.amw-step.done:before{content:'\2713';color:var(--mint)}
+.prog.amw-ind i{width:35%;animation:amwind 1.2s ease-in-out infinite}
+@keyframes amwind{from{transform:translateX(-100%)}to{transform:translateX(300%)}}
+:where(:root[data-theme="dark"]) .amw-spin{border-color:#2b3050;border-top-color:var(--mint)}
+:where(:root[data-theme="dark"]) .amw-step.now,:where(:root[data-theme="dark"]) .amw-step.done{color:#d8dbea}
+@media (prefers-reduced-motion:reduce){.amw-spin{animation-duration:2.4s}}

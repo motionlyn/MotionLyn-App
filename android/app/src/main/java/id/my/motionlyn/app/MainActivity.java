@@ -64,6 +64,8 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
+                // Proxy native untuk impor "Link AM" (lihat AmNet.java)
+                if (HOST.equals(r.getUrl().getHost()) && AmNet.matches(r.getUrl())) return AmNet.handle(r);
                 return loader.shouldInterceptRequest(r.getUrl());
             }
 

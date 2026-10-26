@@ -374,6 +374,18 @@ async function xmlTextFrom(files) {
   return null;
 }
 
+const cleanRef = n => String(n == null ? '' : n).replace(/^amproj:/i, '').replace(/^.*[\\/]/, '').trim();
+const stemOf = n => cleanRef(n).toLowerCase().replace(/\.+$/, '').split('.')[0];
+/* cari file di pool: nama persis -> tanpa awalan amproj: -> nama ternormalisasi -> stem (angka id tanpa ekstensi) -> nama mirip */
+function findInPool(pool, refs) {
+  if (!pool.stem) { pool.stem = new Map(); pool.forEach((f, k) => { const st = stemOf(k); if (st && !pool.stem.has(st)) pool.stem.set(st, f); }); }
+  const names = [...new Set(refs.filter(Boolean).flatMap(r => [String(r), cleanRef(r)]))];
+  for (const n of names) { const f = pool.get(n.toLowerCase()); if (f) return f; }
+  for (const n of names) { const f = pool.norm.get(normName(n)); if (f) return f; }
+  for (const n of names) { const st = stemOf(n); if (st.length >= 4 && pool.stem.has(st)) return pool.stem.get(st); }
+  for (const n of names) { const nf = normName(n); if (nf.length >= 6) for (const [k, v] of pool.norm) if (k.length >= 6 && (k.includes(nf) || nf.includes(k))) return v; }
+  return null;
+}
 ML.importAMXML = async files => {
   files = Array.from(files || []);
   const src = await xmlTextFrom(files); if (!src) throw new Error('File .xml tidak ditemukan (pilih file .xml proyek Alight Motion)');
@@ -381,7 +393,7 @@ ML.importAMXML = async files => {
   if (!root || root.nodeName === 'parsererror' || doc.getElementsByTagName('parsererror').length) throw new Error('XML tidak valid');
   if (root.nodeName !== 'scene') throw new Error('Bukan proyek Alight Motion (elemen <scene> tidak ada)');
   await waitXml();
-  const pool = await collectFiles(files), rep = { layers: 0, missingMedia: [], fxSkipped: [], fxApprox: [], skipped: [], groups: [], parentNote: 0, shapeUnknown: 0, name: '' };
+  const pool = await collectFiles(files), rep = { poolCount: 0, missingWhy: [],  layers: 0, missingMedia: [], fxSkipped: [], fxApprox: [], skipped: [], groups: [], parentNote: 0, shapeUnknown: 0, name: '' };
   const W = Math.max(2, Math.round(num(root.getAttribute('width'), 1080))), H = Math.max(2, Math.round(num(root.getAttribute('height'), 1920)));
   const g = (a, b) => b ? g(b, a % b) : a, gg = g(W, H);
   const bgc = parseColor(root.getAttribute('bgcolor') || '#ff000000');
@@ -389,7 +401,7 @@ ML.importAMXML = async files => {
   const proj = { id, name: root.getAttribute('title') || src.name.replace(/\.xml$/i, '') || 'Proyek AM', createdAt: Date.now(), updatedAt: Date.now(), w: W, h: H,
     fps: Math.max(1, Math.round(num(root.getAttribute('fps'), 30))), ratio: (W / gg) + ':' + (H / gg), resLabel: Math.min(W, H) + 'p', bg: bgc.a === 0 ? 'transparent' : hexOf(bgc),
     markers: [], layers: [], thumb: null, size: 0, dur: 0 };
-  rep.name = proj.name;
+  rep.name = proj.name; rep.poolCount = pool.size; rep.poolSample = [...pool.keys()].slice(0, 6);
   const LAYER_TAGS = ['audio', 'shape', 'text', 'video', 'image', 'nullobj', 'group', 'embedScene'];
   const kids = []; // daftar datar. <group> berisi layer, dan <embedScene> (= "Group" di AM: scene bersarang dengan kanvas sendiri) diratakan:
   // isinya diangkat ke linimasa utama, berinduk ke grupnya; id diberi awalan agar unik; waktu digeser ke awal grup; lokasi dihitung dari tengah kanvas scene.
@@ -423,10 +435,11 @@ ML.importAMXML = async files => {
   async function mediaFor(uri) { // -> item media atau null
     if (loaded.has(uri)) return loaded.get(uri);
     const info = mediaInfo.get(uri), fname = (info && info.file) || baseName(uri);
-    const f = pool.get(String(fname).toLowerCase()) || pool.get(baseName(uri).toLowerCase()) || pool.norm.get(normName(fname)) || pool.norm.get(normName(baseName(uri)));
-    let it = null;
-    if (f) { try { it = await ML.media.importFile(proj, f); size += f.size; } catch (e) { it = null; } }
-    if (!it) rep.missingMedia.push(fname);
+    const f = findInPool(pool, [fname, baseName(uri), uri]);
+    let it = null, why = '';
+    if (f) { try { it = await ML.media.importFile(proj, f); size += f.size; } catch (e) { it = null; why = 'gagal dibaca di perangkat ini (' + (e && e.message ? e.message : 'format tidak didukung') + '), file ' + f.name; } }
+    else why = 'tidak ada di dalam paket';
+    if (!it) { rep.missingMedia.push(fname); (rep.missingWhy = rep.missingWhy || []).push(fname + ' → ' + why); }
     loaded.set(uri, it); return it;
   }
   const kindOfInfo = (info, fname, hint) => {
@@ -551,7 +564,7 @@ ML.amReportSheet = (title, rep, imported) => {
   const parts = [];
   if (imported) parts.push('<b>' + rep.layers + ' layer</b> berhasil diimpor.');
   else parts.push('<b>' + rep.layers + ' layer</b> ditulis ke XML.');
-  if (rep.missingMedia && rep.missingMedia.length) parts.push('<b>Media belum terhubung (' + rep.missingMedia.length + '):</b> layernya jadi <b>slot kosong</b> (kotak abu-abu ⚠) lengkap dengan posisi, ukuran, dan gerakannya. Isi lewat <b>Editor Template</b> di bawah, atau impor lagi bersama file medianya (.xml + foto/video/audio, atau .zip).<br>' + lines(rep.missingMedia));
+  if (rep.missingMedia && rep.missingMedia.length) parts.push('<b>Media belum terhubung (' + rep.missingMedia.length + '):</b> layernya jadi <b>slot kosong</b> (kotak abu-abu ⚠) lengkap dengan posisi, ukuran, dan gerakannya. Isi lewat <b>Editor Template</b> di bawah, atau impor lagi bersama file medianya (.xml + foto/video/audio, atau .zip).<br>' + lines(rep.missingWhy && rep.missingWhy.length ? rep.missingWhy : rep.missingMedia, 15) + (rep.poolCount != null ? '<br><i>Isi paket yang terbaca: ' + rep.poolCount + ' file media' + (rep.poolSample && rep.poolSample.length ? ', mis. ' + rep.poolSample.map(esc).join(', ') : '') + '.</i>' : ''));
   if (rep.fxSkipped && rep.fxSkipped.length) parts.push('<b>Efek dilewati (' + rep.fxSkipped.length + '):</b> tidak punya padanan efek Alight Motion' + (imported ? ' di engine MotionLyn' : '') + '.<br>' + lines(rep.fxSkipped));
   if (rep.fxApprox && rep.fxApprox.length) parts.push('<b>Efek dipetakan perkiraan (' + rep.fxApprox.length + '):</b> padanan AM-nya mirip, tapi tampilannya bisa sedikit beda.<br>' + lines(rep.fxApprox));
   if (rep.skipped && rep.skipped.length) parts.push('<b>Layer dilewati (' + rep.skipped.length + '):</b><br>' + lines(rep.skipped));

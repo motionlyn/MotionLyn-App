@@ -101,6 +101,23 @@ async function fetchDirect({ uid, pid }, status) {
   return blob;
 }
 
+/** kenali jenis file dari tanda awal isi (untuk file tanpa/dengan ekstensi aneh) */
+async function sniff(blob) {
+  try {
+    const u = new Uint8Array(await blob.slice(0, 16).arrayBuffer()), a = (i, str) => [...str].every((c, k) => u[i + k] === c.charCodeAt(0));
+    if (u[0] === 0xFF && u[1] === 0xD8) return { ext: 'jpg', mime: 'image/jpeg' };
+    if (u[0] === 0x89 && a(1, 'PNG')) return { ext: 'png', mime: 'image/png' };
+    if (a(0, 'GIF8')) return { ext: 'gif', mime: 'image/gif' };
+    if (a(0, 'RIFF') && a(8, 'WEBP')) return { ext: 'webp', mime: 'image/webp' };
+    if (a(0, 'RIFF') && a(8, 'WAVE')) return { ext: 'wav', mime: 'audio/wav' };
+    if (a(4, 'ftyp')) return a(8, 'M4A') ? { ext: 'm4a', mime: 'audio/mp4' } : { ext: 'mp4', mime: 'video/mp4' };
+    if (a(0, 'OggS')) return { ext: 'ogg', mime: 'audio/ogg' };
+    if (a(0, 'fLaC')) return { ext: 'flac', mime: 'audio/flac' };
+    if (a(0, 'ID3') || (u[0] === 0xFF && (u[1] & 0xE0) === 0xE0)) return { ext: 'mp3', mime: 'audio/mpeg' };
+    if (u[0] === 0x1A && u[1] === 0x45 && u[2] === 0xDF && u[3] === 0xA3) return { ext: 'webm', mime: 'video/webm' };
+  } catch (e) { /* abaikan */ }
+  return null;
+}
 /** ZIP -> { xmls:[File], media:[File] } */
 async function unpack(zipBlob) {
   const z = await ML.zip.read(zipBlob), xmls = [], media = [];
@@ -108,7 +125,9 @@ async function unpack(zipBlob) {
     if (/\/$/.test(n) || /(^|\/)(__MACOSX|\.)/.test(n)) continue;
     const nm = n.split('/').pop(); if (!nm || /manifest\.txt$/i.test(nm)) continue;
     const b = await z.get(n); if (!b) continue;
-    const f = new File([b], nm, { type: /\.xml$/i.test(nm) ? 'text/xml' : (b.type || '') });
+    let fn = nm, ty = /\.xml$/i.test(nm) ? 'text/xml' : (b.type || '');
+    if (!/\.xml$/i.test(nm)) { const sg = await sniff(b); if (sg && !/\.(png|jpe?g|webp|gif|bmp|heic|avif|mp4|m4v|mov|webm|mkv|mp3|m4a|aac|ogg|opus|wav|flac)$/i.test(nm)) { fn = nm.replace(/\.+$/, '') + '.' + sg.ext; ty = sg.mime; } else if (sg && !ty) ty = sg.mime; }
+    const f = new File([b], fn, { type: ty });
     (/\.xml$/i.test(nm) ? xmls : media).push(f);
   }
   return { xmls, media };

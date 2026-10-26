@@ -17,6 +17,7 @@ ML.settings = (() => {
     dr.append(h('h2', { text: 'Pengaturan' }),
       h('div', { class: 'dr-card' },
         row('Pratinjau Kualitas Rendah', tog(() => ML.previewMax() <= 480, v => ML.lsSet('ml.pv', v ? 480 : 720)), 'b'),
+        row('Mode Hyper (performa maksimal)', tog(() => ML.hyper && ML.hyper.enabled(), v => { if (ML.hyper) v ? ML.hyper.on() : ML.hyper.off(); }), 'b'),
         row('Durasi Layer Bawaan', sel, 'b'),
         h('div', { class: 'lbl', text: 'Pengambilan Ulang Audio (ekspor)' }),
         seg([[22050, 'RENDAH'], [44100, 'TINGGI'], [48000, 'ULTRA']], () => +(ML.lsGet('ml.asr') || 48000), v => ML.lsSet('ml.asr', v)),

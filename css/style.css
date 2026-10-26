@@ -442,3 +442,123 @@ body.desk .home-top{padding-left:max(14px,calc(50% - 450px));padding-right:max(1
 .tpl-grp-head{display:flex;align-items:center;gap:12px;padding:8px 6px 4px;color:var(--navy)}
 .tpl-grp-head .btn{flex:none;padding:9px 16px}
 .tpl-grp .tpl-row{margin:6px 0}
+
+/* grup & pilih banyak */
+.gbar,.mbar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#241a35;border-block:1px solid rgba(255,64,160,.25);overflow-x:auto;flex:none}
+.gbar[hidden],.mbar[hidden]{display:none}
+.gb-btn,.mb-btn{flex:none;border:0;border-radius:14px;padding:8px 14px;font:inherit;font-weight:700;color:#fff;background:#3a2c55}
+.gb-t,.mb-n{flex:none;font-weight:700;color:#ff8fd0}
+.mb-btn.done{background:#ff3fb0}.mb-btn.dis{opacity:.4}.mb-btn.dis2{background:#6a2540}
+.clip.msel{outline:3px solid var(--mint);outline-offset:-2px;z-index:2}
+.lh.msel{outline:3px solid var(--mint);outline-offset:-2px;border-radius:14px}
+.clip.group{background:linear-gradient(135deg,#7a4cff,#c14cff)}
+.editor.desk>.gbar,.editor.desk>.mbar{grid-column:1;grid-row:5;align-self:start;z-index:6}
+
+/* ===== v3.83 TAMPILAN RINGKAS (default). Pengaturan > Ukuran UI > Normal mengembalikan ukuran lama ===== */
+:root:not([data-density="normal"]) .ic{width:20px;height:20px}
+:root:not([data-density="normal"]) .icon-btn{width:36px;height:36px}
+:root:not([data-density="normal"]) .icon-btn.sm{width:28px;height:28px}
+:root:not([data-density="normal"]) .icon-btn.sm .ic{width:16px;height:16px}
+:root:not([data-density="normal"]) .icon-btn.play{width:42px;height:42px}
+:root:not([data-density="normal"]) .icon-btn.play .ic{width:22px;height:22px}
+:root:not([data-density="normal"]) .btn{padding:8px 14px;font-size:13.5px;border-radius:11px}
+:root:not([data-density="normal"]) .btn.wide{padding:11px;font-size:14.5px;margin-top:10px}
+:root:not([data-density="normal"]) .btn-row{margin-top:10px;gap:8px}
+:root:not([data-density="normal"]) .btn .ic{width:15px;height:15px;vertical-align:-3px;margin-right:5px}
+:root:not([data-density="normal"]) .txt{font-size:15px;padding:7px 4px}
+:root:not([data-density="normal"]) .txt.num{width:76px;font-size:13.5px;padding:5px 2px}
+:root:not([data-density="normal"]) .chips{gap:6px;margin:4px 0}
+:root:not([data-density="normal"]) .chips.sm{gap:5px}
+:root:not([data-density="normal"]) .chip{padding:6px 10px;font-size:12.5px;border-radius:10px}
+:root:not([data-density="normal"]) .chips.sm .chip{padding:4px 8px;font-size:11.5px}
+:root:not([data-density="normal"]) .swatch{width:22px;height:22px;border-radius:7px}
+:root:not([data-density="normal"]) .sheet{border-radius:20px 20px 0 0}
+:root:not([data-density="normal"]) .sheet-head{padding:6px 6px 0 16px}
+:root:not([data-density="normal"]) .sheet-title{font-size:16.5px}
+:root:not([data-density="normal"]) .sheet-body{padding:4px 16px 18px}
+:root:not([data-density="normal"]) .dlg-text{font-size:13.5px;margin:6px 0}
+:root:not([data-density="normal"]) .row-btn{padding:10px 4px;font-size:14.5px;gap:10px}
+:root:not([data-density="normal"]) .pm-item{padding:10px 16px;font-size:14.5px}
+:root:not([data-density="normal"]) .pm-tags{padding:8px 12px 6px;gap:8px}
+:root:not([data-density="normal"]) .tagbtn{width:32px;height:32px}
+:root:not([data-density="normal"]) .dr-row{min-height:42px;font-size:14.5px}
+:root:not([data-density="normal"]) .sw{width:42px;height:24px}
+:root:not([data-density="normal"]) .opt .rd{width:24px;height:24px}
+:root:not([data-density="normal"]) .ed-top{height:42px;padding:1px 4px}
+:root:not([data-density="normal"]) .transport{height:44px}
+:root:not([data-density="normal"]) .ruler{height:28px}
+:root:not([data-density="normal"]) .lanes{top:28px}
+:root:not([data-density="normal"]) .row{height:34px;margin-bottom:4px}
+:root:not([data-density="normal"]) .lheads{width:52px;padding-top:6px}
+:root:not([data-density="normal"]) .lh{height:34px;margin-bottom:4px;border-radius:0 18px 18px 0;border-width:1.5px;padding-right:4px}
+:root:not([data-density="normal"]) .lh-eye{width:24px;height:30px}
+:root:not([data-density="normal"]) .lh-eye .ic{width:15px;height:15px}
+:root:not([data-density="normal"]) .lh-th{width:22px;height:22px;border-radius:5px}
+:root:not([data-density="normal"]) .lh-th .ic{width:13px;height:13px}
+:root:not([data-density="normal"]) .clip{font-size:12px}
+:root:not([data-density="normal"]) .fab{width:46px;height:46px;right:10px;bottom:10px;border-width:1.5px}
+:root:not([data-density="normal"]) .fab .ic{width:24px;height:24px}
+:root:not([data-density="normal"]) .splitter i{width:36px;height:3px}
+:root:not([data-density="normal"]) .pframe{height:218px}
+:root:not([data-density="normal"]) .bb{width:60px;height:50px;gap:3px;font-size:10px}
+:root:not([data-density="normal"]) .trow.r5{height:38px}
+:root:not([data-density="normal"]) .trow.r3{height:62px}
+:root:not([data-density="normal"]) .trow.r4{height:58px}
+:root:not([data-density="normal"]) .tt{font-size:11.5px;gap:3px;border-radius:10px}
+:root:not([data-density="normal"]) .tt .ic{width:22px;height:22px}
+:root:not([data-density="normal"]) .rail{width:50px;padding:4px 0}
+:root:not([data-density="normal"]) .rbtn{width:38px;height:38px;border-radius:10px}
+:root:not([data-density="normal"]) .rbtn .ic{width:22px;height:22px}
+:root:not([data-density="normal"]) .nbox{min-width:70px;padding:4px 6px 3px}
+:root:not([data-density="normal"]) .nin{width:64px;font-size:15px}
+:root:not([data-density="normal"]) .mrail{width:62px;gap:4px;padding:4px 6px}
+:root:not([data-density="normal"]) .mbtn .ic{width:22px;height:22px}
+:root:not([data-density="normal"]) .fitbtn .ic{width:24px;height:24px}
+:root:not([data-density="normal"]) .pre .ic{width:22px;height:22px}
+:root:not([data-density="normal"]) .kfb{width:28px;height:28px}
+:root:not([data-density="normal"]) .sld{height:24px}
+:root:not([data-density="normal"]) .prow{grid-template-columns:78px 1fr 56px 28px;gap:6px;margin:4px 0}
+:root:not([data-density="normal"]) .plab{font-size:12px}
+:root:not([data-density="normal"]) .swgrid .sw{width:26px;height:26px}
+:root:not([data-density="normal"]) .ed-mode button{width:30px;height:28px}
+:root:not([data-density="normal"]) .gb-btn,:root:not([data-density="normal"]) .mb-btn{padding:5px 10px;border-radius:11px;font-size:12.5px}
+:root:not([data-density="normal"]) .gbar,:root:not([data-density="normal"]) .mbar{padding:4px 8px;gap:6px}
+:root:not([data-density="normal"]) .eb-head{height:46px}
+:root:not([data-density="normal"]) .ebf{width:78px;font-size:11px;gap:5px}
+:root:not([data-density="normal"]) .eth{width:76px;height:76px;border-radius:10px}
+:root:not([data-density="normal"]) .ebc{height:78px;font-size:16px}
+:root:not([data-density="normal"]) .ebrow .eth{width:52px;height:52px}
+:root:not([data-density="normal"]) .ebrow small{font-size:11.5px}
+:root:not([data-density="normal"]) .tpl-th{width:48px;height:48px;border-radius:10px}
+:root:not([data-density="normal"]) .cp-prev{width:44px;height:44px}
+:root:not([data-density="normal"]) .cp-row{font-size:13px;margin:7px 0;gap:10px}
+:root:not([data-density="normal"]) .home-top{height:52px;padding:6px 12px}
+:root:not([data-density="normal"]) .avatar{width:32px;height:32px}
+:root:not([data-density="normal"]) .imp .ic{width:26px;height:26px}
+:root:not([data-density="normal"]) .imp-t{font-size:16px}
+:root:not([data-density="normal"]) .newcard{height:62px;font-size:17px;border-radius:18px;margin-bottom:10px;gap:12px}
+:root:not([data-density="normal"]) .plus{width:34px;height:34px}
+:root:not([data-density="normal"]) .sec{margin:16px 2px 8px}
+:root:not([data-density="normal"]) .sec h2{font-size:18px}
+:root:not([data-density="normal"]) .sec a{font-size:14px}
+:root:not([data-density="normal"]) .pthumb{width:76px;height:76px;border-radius:12px}
+:root:not([data-density="normal"]) .pcard{gap:10px;border-radius:16px;padding:8px 4px 8px 8px;margin-bottom:8px}
+:root:not([data-density="normal"]) .bnav{height:56px}
+:root:not([data-density="normal"]) .bnav button{font-size:11.5px;width:76px;gap:2px}
+:root:not([data-density="normal"]) .bnav .bsp{width:64px}
+:root:not([data-density="normal"]) .fab-main{width:56px!important;height:56px!important;top:-18px}
+:root:not([data-density="normal"]) .fab-main .ic{width:26px;height:26px}
+:root:not([data-density="normal"]) .add-btn .ic{width:22px;height:22px}
+:root:not([data-density="normal"]) .brand{font-size:19px;letter-spacing:0}
+:root:not([data-density="normal"]) .brand sup{font-size:8.5px;margin-left:3px}
+:root:not([data-density="normal"]) .home-scroll{padding:2px 12px 96px}
+:root:not([data-density="normal"]) .card.imp{padding:10px 12px;gap:8px;border-radius:16px}
+:root:not([data-density="normal"]) .home-top .icon-btn{width:32px;height:32px}
+:root:not([data-density="normal"]) .home-top .icon-btn .ic{width:18px;height:18px}
+
+/* overlay seleksi menutupi seluruh area preview */
+.pv{position:relative}.pv-ov{z-index:2}
+
+.icon-btn.play{position:relative;user-select:none;-webkit-touch-callout:none}
+.icon-btn.play.loop::after{content:'↻';position:absolute;right:2px;top:2px;font-size:13px;font-weight:700;color:#ff3fb0;line-height:1}
+.pm-item.on{color:#ff8fd0;font-weight:700}

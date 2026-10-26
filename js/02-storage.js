@@ -27,6 +27,7 @@ const idbApi = (() => {
     allProjects: () => run('projects', 'readonly', s => s.getAll()),
     putMedia: rec => run('media', 'readwrite', s => s.put(Object.assign({}, rec, { key: rec.pid + '/' + rec.id }))),
     getMedia: (pid, id) => run('media', 'readonly', s => s.get(pid + '/' + id)),
+    setPeaks: (pid, id, peaks, lv) => run('media', 'readwrite', s => { const g = s.get(pid + '/' + id); g.onsuccess = () => { const r = g.result; if (r) { r.peaks = peaks; r.peaksLv = lv || 1; s.put(r); } }; return g; }),
     mediaOf: pid => run('media', 'readonly', s => s.index('pid').getAll(pid)),
     async delProject(id) {
       await run('projects', 'readwrite', s => s.delete(id));
@@ -50,6 +51,7 @@ const memApi = (() => {
     async allProjects() { return [...P.values()].map(cl); },
     async putMedia(rec) { M.set(rec.pid + '/' + rec.id, Object.assign({}, rec, { key: rec.pid + '/' + rec.id })); },
     async getMedia(pid, id) { return M.get(pid + '/' + id); },
+    async setPeaks(pid, id, peaks, lv) { const r = M.get(pid + '/' + id); if (r) { r.peaks = peaks; r.peaksLv = lv || 1; } },
     async mediaOf(pid) { return [...M.values()].filter(m => m.pid === pid); },
     async delProject(id) { P.delete(id); [...M.keys()].forEach(k => { if (M.get(k).pid === id) M.delete(k); }); }
   };
@@ -63,5 +65,5 @@ async function pickApi() {
   return useMem ? memApi : idbApi;
 }
 ML.db = {};
-['putProject', 'getProject', 'allProjects', 'putMedia', 'getMedia', 'mediaOf', 'delProject'].forEach(n => { ML.db[n] = async (...a) => (await pickApi())[n](...a); });
+['putProject', 'getProject', 'allProjects', 'putMedia', 'getMedia', 'setPeaks', 'mediaOf', 'delProject'].forEach(n => { ML.db[n] = async (...a) => (await pickApi())[n](...a); });
 

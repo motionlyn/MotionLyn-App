@@ -59,6 +59,35 @@ ML.kindOf = f => {
 const wrap = (file, mime) => (mime && mime !== file.type) ? new Blob([file], { type: mime }) : file;
 const unsupported = (file, kind) => new Error('Format “' + file.name + '” tidak didukung perangkat ini. Konversi dulu ke ' + (kind === 'video' ? 'MP4 atau WebM.' : kind === 'image' ? 'JPG atau PNG.' : 'MP3, M4A/AAC, OGG/Opus, FLAC, atau WAV.'));
 
+/* v3.91: gelombang audio bertahap. Tahap 1 cepat (8 kHz) -> tahap 2 (22,05 kHz) -> tahap 3 (44,1 kHz); timeline digambar ulang tiap tahap selesai */
+const peakQ = (() => { let tail = Promise.resolve(); return fn => { const p = tail.then(fn, fn); tail = p.catch(() => {}); return p; }; })();
+const PK_LV = [{ sr: 8000, per: 10, min: 400, max: 2000 }, { sr: 22050, per: 25, min: 800, max: 6000 }, { sr: 44100, per: 60, min: 1600, max: 16000 }];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function decodeAt(blob, sr) {
+  const raw = await blob.arrayBuffer(), OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (OAC) for (const r of sr < 22050 ? [sr, 22050] : [sr]) {
+    try { return await new OAC(1, 1, r).decodeAudioData(raw.slice(0)); } catch (e) { /* coba berikutnya */ }
+  }
+  const AC = window.AudioContext || window.webkitAudioContext, c = new AC();
+  try { return await c.decodeAudioData(raw); } finally { try { c.close(); } catch (e) { /* abaikan */ } }
+}
+/** tahap tertinggi yang aman untuk file ini (file sangat besar berhenti lebih awal agar memori aman) */
+const peakMax = it => (it.size || 0) > 200e6 ? 1 : ((it.size || 0) > 80e6 || (it.dur || 0) > 1200) ? 2 : 3;
+async function peakStage(it, lv) {
+  while (ML.exporting || (ML.media.hold || 0) > 0) await sleep(400); // ekspor selalu didahulukan
+  const cf = PK_LV[lv - 1], buf = await decodeAt(it.blob, cf.sr), d = buf.getChannelData(0), len = d.length;
+  const N = Math.max(cf.min, Math.min(cf.max, Math.round(buf.duration * cf.per))), out = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const a = Math.floor(i * len / N), b = Math.min(len, Math.max(a + 1, Math.floor((i + 1) * len / N))), st = Math.max(1, Math.floor((b - a) / 48));
+    let m = 0; for (let j = a; j < b; j += st) { const v = d[j] < 0 ? -d[j] : d[j]; if (v > m) m = v; }
+    out[i] = m;
+  }
+  it.peaks = out; it.peaksLv = lv;
+  try { if (it.pid && ML.db.setPeaks) ML.db.setPeaks(it.pid, it.id, out, lv).catch(() => {}); } catch (e) { /* abaikan */ }
+  if (ML.media.onPeaks) { try { ML.media.onPeaks(it); } catch (e) { /* abaikan */ } }
+  return out;
+}
+
 /* ---------- audio ---------- */
 ML.audio = {
   ctx: null,
@@ -93,6 +122,7 @@ ML.media = {
       items.set(r.id, it);
       if (r.kind === 'image') it.img = await loadImg(it.url).catch(() => null);
     }));
+    setTimeout(() => ML.media.prefetchPeaks(), 0);
   },
   dispose() {
     els.forEach(e => { try { e.pause(); e.removeAttribute('src'); e.load(); } catch (x) { /* abaikan */ } });
@@ -134,7 +164,7 @@ ML.media = {
       rec.kind = kind; rec.mime = blob.type || ''; rec.blob = blob;
       await ML.db.putMedia(rec);
       const it = Object.assign({}, rec, { url }); if (img) it.img = img;
-      items.set(rec.id, it); return it;
+      items.set(rec.id, it); if (kind === 'audio') ML.media.peaks(it); return it;
     } catch (e) { URL.revokeObjectURL(url); throw e; }
   },
   image(L) { const it = items.get(L.mediaId); return it && it.img; },
@@ -161,21 +191,25 @@ ML.media = {
       v.onloadeddata = () => { v.currentTime = Math.min(0.1, (v.duration || 1) / 2); };
     }));
   },
-  /** puncak gelombang audio */
+  /** puncak gelombang audio: mengembalikan hasil tercepat yang ada, lalu menyempurnakannya di latar belakang (lihat onPeaks) */
   peaks(it) {
+    if (it.peaks) { ML.media.refine(it); return Promise.resolve(it.peaks); }
     if (it.peaksP) return it.peaksP;
-    return (it.peaksP = (async () => {
-      try {
-        /* v3.90: decode di 8 kHz (cukup untuk gambar gelombang) -> memori & waktu jauh lebih kecil; mulai saat browser idle agar UI tidak tersendat */
-        await new Promise(r => (window.requestIdleCallback ? requestIdleCallback(r, { timeout: 400 }) : setTimeout(r, 30)));
-        const AC = window.AudioContext || window.webkitAudioContext; let c; try { c = new AC({ sampleRate: 8000 }); } catch (x) { c = new AC(); }
-        const buf = await c.decodeAudioData(await it.blob.arrayBuffer()); c.close();
-        const d = buf.getChannelData(0), N = 800, step = Math.max(1, Math.floor(d.length / N)), out = new Float32Array(N);
-        for (let i = 0; i < N; i++) { let m = 0; for (let j = i * step, e = Math.min(d.length, j + step); j < e; j += 2) m = Math.max(m, Math.abs(d[j])); out[i] = m; }
-        it.peaks = out; return out;
-      } catch (e) { return null; }
-    })());
-  }
+    return (it.peaksP = peakQ(() => peakStage(it, 1)).then(pk => { ML.media.refine(it); return pk; }, () => { it.peaksP = null; return null; }));
+  },
+  /** naikkan kualitas gelombang tahap demi tahap; tahap berikutnya masuk antrean paling belakang supaya file lain tidak menunggu */
+  async refine(it) {
+    if (it.refining) return; it.refining = true;
+    try {
+      const top = peakMax(it);
+      for (let lv = (it.peaksLv || 1) + 1; lv <= top; lv++) { await peakQ(() => peakStage(it, lv)); await sleep(60); }
+    } catch (e) { /* tahap atas gagal: gelombang yang ada tetap dipakai */ }
+    it.refining = false;
+  },
+  hold: 0, // >0 = tahan penghitungan gelombang (dipakai saat ekspor audio)
+  onPeaks: null,
+  /** hitung gelombang semua audio di latar belakang (tidak menunggu timeline digambar) */
+  prefetchPeaks() { items.forEach(it => { if (it.kind === 'audio') ML.media.peaks(it); }); }
 };
 
 /* ---------- pemutar ---------- */

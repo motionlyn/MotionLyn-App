@@ -249,10 +249,10 @@ ML.exportAMXML = async (proj, mode) => {
   if (mode === 'zip') {
     const entries = [{ name: ML.exportFileName(proj, 'xml'), blob: xmlBlob }];
     rep.media.forEach(m => entries.push({ name: 'media/' + m.file, blob: m.blob }));
-    loc = await ML.saveBlob(await ML.zip.build(entries), ML.exportFileName(proj, 'zip'), 'application/zip');
+    loc = await ML.saveBlob(await ML.zip.build(entries), ML.exportFileName(proj, 'zip', 'AMXMLZIP'), 'application/zip');
   } else {
     try { loc = await ML.saveBlob(xmlBlob, ML.exportFileName(proj, 'xml'), 'application/xml'); }
-    catch (e) { if (!/tidak diizinkan/.test(e.message)) throw e; loc = await ML.saveBlob(await ML.zip.build([{ name: ML.exportFileName(proj, 'xml'), blob: xmlBlob }]), ML.exportFileName(proj, 'zip'), 'application/zip'); }
+    catch (e) { if (!/tidak diizinkan/.test(e.message)) throw e; loc = await ML.saveBlob(await ML.zip.build([{ name: ML.exportFileName(proj, 'xml'), blob: xmlBlob }]), ML.exportFileName(proj, 'zip', 'AMXMLZIP'), 'application/zip'); }
   }
   rep.loc = loc; return rep;
 };
@@ -357,6 +357,7 @@ function composeParent(Ly, N, nodes, W, H) {
 const waitXml = async () => { for (let i = 0; i < 40 && !Object.keys(ML.XML_ID || {}).length; i++) await ML.sleep(100); };
 const baseName = u => { try { return decodeURIComponent(String(u || '').split('?')[0].split('/').pop()); } catch (e) { return String(u || '').split('/').pop(); } };
 
+const cleanName = u => { let t = String(u || '').split('#')[0].split('?')[0]; t = t.replace(/^[a-z][a-z0-9+.-]*:(\/\/\/?)?/i, ''); t = t.split('/').pop(); try { t = decodeURIComponent(t); } catch (e) { /* biarkan */ } return t; }; // v3.92: buang skema amproj: / am-internal:/// / content:// dari alamat media
 const normName = n => String(n || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]+/g, '');
 async function collectFiles(files) { // File[] -> Map(nama huruf kecil -> File/Blob bernama); zip dibuka
   const map = new Map();
@@ -366,6 +367,7 @@ async function collectFiles(files) { // File[] -> Map(nama huruf kecil -> File/B
     } else if (!/\.xml$/i.test(f.name)) map.set(f.name.toLowerCase(), f);
   }
   const nmap = new Map(); map.forEach((f, k) => { const n = normName(k); if (n && !nmap.has(n)) nmap.set(n, f); }); map.norm = nmap;
+  const sz = new Map(); new Set(map.values()).forEach(f => { if (!sz.has(f.size)) sz.set(f.size, []); sz.get(f.size).push(f); }); map.sizes = sz;
   return map;
 }
 async function xmlTextFrom(files) {
@@ -374,18 +376,6 @@ async function xmlTextFrom(files) {
   return null;
 }
 
-const cleanRef = n => String(n == null ? '' : n).replace(/^amproj:/i, '').replace(/^.*[\\/]/, '').trim();
-const stemOf = n => cleanRef(n).toLowerCase().replace(/\.+$/, '').split('.')[0];
-/* cari file di pool: nama persis -> tanpa awalan amproj: -> nama ternormalisasi -> stem (angka id tanpa ekstensi) -> nama mirip */
-function findInPool(pool, refs) {
-  if (!pool.stem) { pool.stem = new Map(); pool.forEach((f, k) => { const st = stemOf(k); if (st && !pool.stem.has(st)) pool.stem.set(st, f); }); }
-  const names = [...new Set(refs.filter(Boolean).flatMap(r => [String(r), cleanRef(r)]))];
-  for (const n of names) { const f = pool.get(n.toLowerCase()); if (f) return f; }
-  for (const n of names) { const f = pool.norm.get(normName(n)); if (f) return f; }
-  for (const n of names) { const st = stemOf(n); if (st.length >= 4 && pool.stem.has(st)) return pool.stem.get(st); }
-  for (const n of names) { const nf = normName(n); if (nf.length >= 6) for (const [k, v] of pool.norm) if (k.length >= 6 && (k.includes(nf) || nf.includes(k))) return v; }
-  return null;
-}
 ML.importAMXML = async files => {
   files = Array.from(files || []);
   const src = await xmlTextFrom(files); if (!src) throw new Error('File .xml tidak ditemukan (pilih file .xml proyek Alight Motion)');
@@ -393,7 +383,7 @@ ML.importAMXML = async files => {
   if (!root || root.nodeName === 'parsererror' || doc.getElementsByTagName('parsererror').length) throw new Error('XML tidak valid');
   if (root.nodeName !== 'scene') throw new Error('Bukan proyek Alight Motion (elemen <scene> tidak ada)');
   await waitXml();
-  const pool = await collectFiles(files), rep = { poolCount: 0, missingWhy: [],  layers: 0, missingMedia: [], fxSkipped: [], fxApprox: [], skipped: [], groups: [], parentNote: 0, shapeUnknown: 0, name: '' };
+  const pool = await collectFiles(files), rep = { layers: 0, missingMedia: [], unreadable: [], fxSkipped: [], fxApprox: [], skipped: [], groups: [], parentNote: 0, shapeUnknown: 0, name: '' };
   const W = Math.max(2, Math.round(num(root.getAttribute('width'), 1080))), H = Math.max(2, Math.round(num(root.getAttribute('height'), 1920)));
   const g = (a, b) => b ? g(b, a % b) : a, gg = g(W, H);
   const bgc = parseColor(root.getAttribute('bgcolor') || '#ff000000');
@@ -401,7 +391,7 @@ ML.importAMXML = async files => {
   const proj = { id, name: root.getAttribute('title') || src.name.replace(/\.xml$/i, '') || 'Proyek AM', createdAt: Date.now(), updatedAt: Date.now(), w: W, h: H,
     fps: Math.max(1, Math.round(num(root.getAttribute('fps'), 30))), ratio: (W / gg) + ':' + (H / gg), resLabel: Math.min(W, H) + 'p', bg: bgc.a === 0 ? 'transparent' : hexOf(bgc),
     markers: [], layers: [], thumb: null, size: 0, dur: 0 };
-  rep.name = proj.name; rep.poolCount = pool.size; rep.poolSample = [...pool.keys()].slice(0, 6);
+  rep.name = proj.name;
   const LAYER_TAGS = ['audio', 'shape', 'text', 'video', 'image', 'nullobj', 'group', 'embedScene'];
   const kids = []; // daftar datar. <group> berisi layer, dan <embedScene> (= "Group" di AM: scene bersarang dengan kanvas sendiri) diratakan:
   // isinya diangkat ke linimasa utama, berinduk ke grupnya; id diberi awalan agar unik; waktu digeser ke awal grup; lokasi dihitung dari tengah kanvas scene.
@@ -427,19 +417,29 @@ ML.importAMXML = async files => {
     }
   };
   expand([...root.children], { pid: null, pre: null, gid: null, t0: 0, hidden: false });
-  const mediaInfo = new Map(); kids.filter(k => k.nodeName === 'media').forEach(m => mediaInfo.set(m.getAttribute('uri'), { file: m.getAttribute('filename') || baseName(m.getAttribute('uri')), type: m.getAttribute('type') || '', w: num(m.getAttribute('width'), 0), h: num(m.getAttribute('height'), 0) }));
+  const mediaInfo = new Map(); kids.filter(k => k.nodeName === 'media').forEach(m => mediaInfo.set(m.getAttribute('uri'), { file: m.getAttribute('filename') || cleanName(m.getAttribute('uri')), sig: m.getAttribute('sig') || '', title: m.getAttribute('title') || '', size: num(m.getAttribute('size'), 0), type: m.getAttribute('type') || '', w: num(m.getAttribute('width'), 0), h: num(m.getAttribute('height'), 0) }));
   let n = 0; kids.filter(k => k.nodeName === 'bookmark').forEach(b => proj.markers.push({ id: ML.uid(), t: num(b.getAttribute('t'), 0) / 1000, name: 'Penanda ' + (++n) }));
   proj.markers.sort((a, b) => a.t - b.t);
 
-  const loaded = new Map(); let size = 0;
+  const loaded = new Map(), usedFiles = new Set(); let size = 0;
+  /** v3.92: cari file media dengan beberapa cara: nama file, alamat tanpa skema, sig (hash), judul, lalu ukuran file yang unik */
+  function findFile(info, uri) {
+    const names = [info && info.file, cleanName(uri), baseName(uri), info && info.sig, info && info.title].filter(Boolean);
+    for (const n of names) { const f = pool.get(String(n).toLowerCase()) || pool.norm.get(normName(n)); if (f) return f; }
+    const sg = info && info.sig ? info.sig.toLowerCase() : '';
+    if (sg.length >= 8) for (const [k, f] of pool) if (k.startsWith(sg)) return f;
+    if (info && info.size > 0) { const c = (pool.sizes.get(info.size) || []).filter(f => !usedFiles.has(f)); if (c.length === 1) return c[0]; }
+    return null;
+  }
   async function mediaFor(uri) { // -> item media atau null
     if (loaded.has(uri)) return loaded.get(uri);
-    const info = mediaInfo.get(uri), fname = (info && info.file) || baseName(uri);
-    const f = findInPool(pool, [fname, baseName(uri), uri]);
-    let it = null, why = '';
-    if (f) { try { it = await ML.media.importFile(proj, f); size += f.size; } catch (e) { it = null; why = 'gagal dibaca di perangkat ini (' + (e && e.message ? e.message : 'format tidak didukung') + '), file ' + f.name; } }
-    else why = 'tidak ada di dalam paket';
-    if (!it) { rep.missingMedia.push(fname); (rep.missingWhy = rep.missingWhy || []).push(fname + ' → ' + why); }
+    const info = mediaInfo.get(uri), fname = (info && info.file) || cleanName(uri);
+    const f = findFile(info, uri);
+    let it = null;
+    if (f) {
+      try { it = await ML.media.importFile(proj, f); size += f.size; usedFiles.add(f); }
+      catch (e) { it = null; rep.unreadable.push(f.name + ' — ' + (e && e.message || 'gagal dibaca')); }
+    } else rep.missingMedia.push(fname);
     loaded.set(uri, it); return it;
   }
   const kindOfInfo = (info, fname, hint) => {
@@ -554,7 +554,8 @@ ML.importAMXML = async files => {
   proj.dur = ML.duration(proj); proj.size = size + JSON.stringify(proj.layers).length;
   proj.layers.forEach(ML.ensureLayer);
   await ML.db.putProject(proj);
-  rep.id = id; rep.missingMedia = [...new Set(rep.missingMedia)]; rep.slots = proj.layers.filter(l => l.ph).length;
+  rep.id = id; rep.missingMedia = [...new Set(rep.missingMedia)]; rep.unreadable = [...new Set(rep.unreadable)];
+  { const all = [...new Set(pool.values())]; rep.mediaTotal = all.length; rep.mediaUsed = all.filter(f => usedFiles.has(f)).length; rep.unused = all.filter(f => !usedFiles.has(f)).map(f => f.name); } rep.slots = proj.layers.filter(l => l.ph).length;
   return rep;
 };
 
@@ -564,7 +565,9 @@ ML.amReportSheet = (title, rep, imported) => {
   const parts = [];
   if (imported) parts.push('<b>' + rep.layers + ' layer</b> berhasil diimpor.');
   else parts.push('<b>' + rep.layers + ' layer</b> ditulis ke XML.');
-  if (rep.missingMedia && rep.missingMedia.length) parts.push('<b>Media belum terhubung (' + rep.missingMedia.length + '):</b> layernya jadi <b>slot kosong</b> (kotak abu-abu ⚠) lengkap dengan posisi, ukuran, dan gerakannya. Isi lewat <b>Editor Template</b> di bawah, atau impor lagi bersama file medianya (.xml + foto/video/audio, atau .zip).<br>' + lines(rep.missingWhy && rep.missingWhy.length ? rep.missingWhy : rep.missingMedia, 15) + (rep.poolCount != null ? '<br><i>Isi paket yang terbaca: ' + rep.poolCount + ' file media' + (rep.poolSample && rep.poolSample.length ? ', mis. ' + rep.poolSample.map(esc).join(', ') : '') + '.</i>' : ''));
+  if (rep.missingMedia && rep.missingMedia.length) parts.push('<b>Media belum terhubung (' + rep.missingMedia.length + '):</b> layernya jadi <b>slot kosong</b> (kotak abu-abu ⚠) lengkap dengan posisi, ukuran, dan gerakannya. Isi lewat <b>Editor Template</b> di bawah, atau impor lagi bersama file medianya (.xml + foto/video/audio, atau .zip).<br>' + lines(rep.missingMedia));
+  if (rep.unreadable && rep.unreadable.length) parts.push('<b>Media ditemukan tapi gagal dibaca (' + rep.unreadable.length + '):</b> file ada di paket, tetapi browser perangkat ini tidak bisa memutarnya (mis. kodek HEVC/H.265). Layernya jadi slot kosong; ganti lewat <b>Editor Template</b> atau konversi ke MP4/H.264.<br>' + lines(rep.unreadable));
+  if (imported && rep.mediaTotal) parts.push('Media terpasang: <b>' + rep.mediaUsed + '</b> dari <b>' + rep.mediaTotal + '</b> file di paket.' + (rep.unused && rep.unused.length ? '<br>Belum terpakai layer mana pun:<br>' + lines(rep.unused) : ''));
   if (rep.fxSkipped && rep.fxSkipped.length) parts.push('<b>Efek dilewati (' + rep.fxSkipped.length + '):</b> tidak punya padanan efek Alight Motion' + (imported ? ' di engine MotionLyn' : '') + '.<br>' + lines(rep.fxSkipped));
   if (rep.fxApprox && rep.fxApprox.length) parts.push('<b>Efek dipetakan perkiraan (' + rep.fxApprox.length + '):</b> padanan AM-nya mirip, tapi tampilannya bisa sedikit beda.<br>' + lines(rep.fxApprox));
   if (rep.skipped && rep.skipped.length) parts.push('<b>Layer dilewati (' + rep.skipped.length + '):</b><br>' + lines(rep.skipped));
@@ -586,7 +589,7 @@ ML.amImportUi = async () => {
     const rep = await ML.importAMXML(files);
     if (ML.editVer() !== 'am') { ML.setEditVer('am'); }
     if (ML.home && ML.home.show) await ML.home.show();
-    const bad = rep.missingMedia.length || rep.fxSkipped.length || rep.skipped.length || rep.shapeUnknown || (rep.groups && rep.groups.length);
+    const bad = rep.missingMedia.length || (rep.unreadable && rep.unreadable.length) || (rep.unused && rep.unused.length) || rep.fxSkipped.length || rep.skipped.length || rep.shapeUnknown || (rep.groups && rep.groups.length);
     ML.toast('Proyek “' + rep.name + '” diimpor (mode AM aktif)' + (rep.parentNote ? ', ' + rep.parentNote + ' layer dibakar dari induk' : ''));
     if (bad) { ML.amReportSheet('Hasil impor XML', rep, true); } else ML.openEditor(rep.id);
     ML.amLast = rep.id;

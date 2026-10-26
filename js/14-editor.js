@@ -203,6 +203,8 @@ ML.Editor = function (proj) {
     return h('div', { class: 'lh' + (L.id === ST.sel ? ' sel' : '') + (ST.multi.includes(L.id) ? ' msel' : '') + (L.hidden ? ' off' : ''), style: L.tag ? { borderColor: L.tag } : null, onclick: e => { if (e.target.closest('.lh-eye')) return; if (ST.mm) toggleMulti(L.id); else select(L.id); } },
       h('button', { class: 'lh-eye', title: L.hidden ? 'Tampilkan layer' : 'Sembunyikan layer', html: I(L.hidden ? 'eyeoff' : 'eye'), onclick: () => { cp(); L.hidden = !L.hidden; P.syncMedia(false); buildLanes(); draw(); scheduleSave(); } }), th);
   }
+  const waves = new Map(); // mediaId -> kanvas gelombang yang tampil (v3.91: digambar ulang saat kualitas naik)
+  ML.media.onPeaks = it => { const S = waves.get(it.id); if (!S) return; S.forEach(o => { if (!o.c.isConnected) S.delete(o); else drawWave(o.c, it.peaks, o.L, it); }); };
   function rowEl(L) {
     const pps = ST.pps, on = L.id === ST.sel;
     const clip = h('div', { class: 'clip ' + L.type + (on ? ' sel' : '') + (ST.multi.includes(L.id) ? ' msel' : '') + (L.locked ? ' locked' : '') + (L.hidden ? ' hid' : ''), style: { left: L.start * pps + 'px', width: Math.max(6, L.dur * pps) + 'px' } });
@@ -215,7 +217,9 @@ ML.Editor = function (proj) {
       else ML.media.thumb(it).then(u => { if (u && clip.isConnected) clip.style.backgroundImage = 'url(' + u + ')'; });
     } else if (L.type === 'audio' && it) {
       const c = h('canvas', { class: 'wave' }); clip.append(c);
-      ML.media.peaks(it).then(pk => { if (pk) drawWave(c, pk, L, it); });
+      (waves.get(it.id) || waves.set(it.id, new Set()).get(it.id)).add({ c, L });
+      if (it.peaks) { drawWave(c, it.peaks, L, it); ML.media.peaks(it); }
+      else { drawWave(c, null, L, it); ML.media.peaks(it).then(pk => { if (pk && c.isConnected) drawWave(c, it.peaks || pk, L, it); }); }
     }
     clip.append(h('span', { class: 'clip-name' }, L.locked ? h('i', { html: I('lock') }) : null, L.name));
     if (on && !L.locked) clip.append(h('i', { class: 'hdl l' }), h('i', { class: 'hdl r' }));
@@ -228,6 +232,7 @@ ML.Editor = function (proj) {
     const w = clamp(Math.round(L.dur * ST.pps), 4, 4000), hh = 40; c.width = w; c.height = hh;
     const g = c.getContext('2d'); g.fillStyle = 'rgba(255,255,255,.75)';
     const sd = it.dur || L.srcDur || L.dur;
+    if (!pk) { g.globalAlpha = .35; g.fillRect(0, hh / 2 - 1, w, 2); g.globalAlpha = 1; return; } // placeholder sambil menghitung
     for (let x = 0; x < w; x++) {
       const i = clamp(Math.floor((L.trimIn + x / w * L.dur) / sd * pk.length), 0, pk.length - 1), a = Math.max(1, pk[i] * hh * 0.9);
       g.fillRect(x, (hh - a) / 2, 1, a);

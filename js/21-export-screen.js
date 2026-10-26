@@ -46,7 +46,7 @@ ML.exportScreen = A => {
   const seek = (el, t) => new Promise(r => { if (!el || el.readyState < 1) return r(); const d = () => { el.removeEventListener('seeked', d); r(); }; el.addEventListener('seeked', d); el.currentTime = t; setTimeout(d, 600); });
   const prep = async t => { for (const L of proj.layers) if (L.type === 'video' && !L.hidden && t >= L.start && t < L.start + L.dur) await seek(ML.media.el(L), L.trimIn + (t - L.start)); };
   const blobOf = (cv, mime, q) => new Promise(r => cv.toBlob(r, mime, q));
-  const save = async (b, ext, mime) => { const loc = await ML.saveBlob(b, ML.exportFileName(proj, ext), mime); ML.toast('Tersimpan: ' + loc, 4500); };
+  const save = async (b, ext, mime, tag) => { const loc = await ML.saveBlob(b, ML.exportFileName(proj, ext, tag), mime); ML.toast('Tersimpan: ' + loc, 4500); };
   async function frames(kind) { // kind: 'seq' | 'gif'
     const [w0, h0] = dims(); let f = FPS(), w = w0, hh = h0, n = Math.ceil(dur() * f);
     if (kind === 'gif') { f = Math.min(f, 15); const k = Math.min(1, 480 / Math.max(w, hh)); w = Math.max(2, Math.round(w * k)); hh = Math.max(2, Math.round(hh * k)); n = Math.min(Math.ceil(dur() * f), 150); }
@@ -62,7 +62,7 @@ ML.exportScreen = A => {
       }
       if (stop) { ML.toast('Ekspor dibatalkan'); return; }
       prog.textContent = 'Menyusun file…'; await new Promise(r => setTimeout(r, 20));
-      if (kind === 'gif') await save(ML.gifEncode(out, w, hh, Math.round(100 / f), proj.bg === 'transparent'), 'gif', 'image/gif'); else await save(await ML.zip.build(out), 'zip', 'application/zip');
+      if (kind === 'gif') await save(ML.gifEncode(out, w, hh, Math.round(100 / f), proj.bg === 'transparent'), 'gif', 'image/gif'); else await save(await ML.zip.build(out), 'zip', 'application/zip', 'SEQ');
     } catch (e) { ML.toast('Gagal ekspor: ' + e.message, 4500); }
     finally { ML.exporting = false; P.seek(t0); sh.close(); }
   }

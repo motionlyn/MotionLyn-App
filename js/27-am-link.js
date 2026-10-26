@@ -22,7 +22,8 @@ const NAMES = ['langsung', 'situs sendiri (/amfb)', 'corsproxy', 'codetabs', 'al
 const IS_APP = () => !!window.AndroidBridge || location.hostname === 'appassets.androidplatform.net';
 const h = (...a) => ML.h(...a);
 const mb = n => (n / 1048576).toFixed(1);
-const clr = () => ML.toast('', 1);
+let job = null; // pekerjaan impor yang sedang berjalan (untuk batal + status)
+const cancelErr = () => Object.assign(new Error('dibatalkan'), { cancel: true });
 const hubGet = () => { try { return (localStorage.getItem('ml.amhub') || '').trim().replace(/\/+$/, ''); } catch (e) { return ''; } };
 const hubSet = v => { try { v ? localStorage.setItem('ml.amhub', v) : localStorage.removeItem('ml.amhub'); } catch (e) { /* abaikan */ } };
 let route = -2;   // -2 = belum diuji, -1 = langsung, >=0 = indeks PROXIES yang berhasil
@@ -42,11 +43,14 @@ async function tryFetch(url, kind, onProg, init) {
   if (IS_APP()) order = (init && init.method === 'POST') ? [4] : [4, -1]; // di app: jalur native dulu
   let lastErr = null; const log = [];
   for (const r of order) {
+    if (job && job.cancelled) throw cancelErr();
     const u = r < 0 ? url : PROXIES[r](url, init); if (!u) continue;
+    if (job && job.say) job.say('Menyambung ke server Alight Motion (jalur: ' + NAMES[r + 1] + ')…' + (log.length ? ' jalur sebelumnya gagal, mencoba yang lain' : ''));
     try {
       const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), kind === 'json' ? 15000 : 300000);
+      if (job) job.abort = () => ctl.abort();
       const res = await fetch(u, Object.assign({ signal: ctl.signal, cache: 'no-store' }, init || {}));
-      if (!res.ok) { clearTimeout(to); lastErr = new Error('HTTP ' + res.status); log.push(NAMES[r + 1] + ': HTTP ' + res.status + (r === 4 && res.status === 404 ? ' (APK lama? perbarui app ke versi yang punya AmNet)' : '')); continue; }
+      if (!res.ok) { clearTimeout(to); lastErr = new Error('HTTP ' + res.status); log.push(NAMES[r + 1] + ': HTTP ' + res.status + (r === 4 && res.status === 404 ? ' (APK lama? perbarui app)' : '')); continue; }
       if (/text\/html/i.test(res.headers.get('content-type') || '')) { clearTimeout(to); log.push(NAMES[r + 1] + ': balasan HTML (bukan data; _redirects belum aktif?)'); continue; }
       if (kind === 'json') { const j = await res.json(); clearTimeout(to); if (!(init && init.method === 'POST')) route = r; return j; }
       const total = +res.headers.get('content-length') || 0;
@@ -59,7 +63,7 @@ async function tryFetch(url, kind, onProg, init) {
       clearTimeout(to);
       if (blob.size < 100) throw new Error('respons kosong');
       route = r; return blob;
-    } catch (e) { lastErr = e; log.push(NAMES[r + 1] + ': ' + e.message); }
+    } catch (e) { if (job && job.cancelled) throw cancelErr(); lastErr = e; log.push(NAMES[r + 1] + ': ' + e.message); }
   }
   route = -2;
   throw new Error('Tidak bisa terhubung ke server Alight Motion. Rincian: ' + log.join(' | '));
@@ -76,88 +80,143 @@ async function fetchMeta({ uid, pid }) {
       effects: (i.requiredEffects || []).map(e => String(e).replace(/^com\.alightcreative\.(effects|internal)\./, '')) };
   } catch (e) { return null; }
 }
-async function viaHub(base, { uid, pid }, status) {
+/** teks progres unduhan: "12.3 / 29.8 MB (41%) · 2.1 MB/dtk · sisa ±8 dtk" (total cadangan = ukuran dari info paket) */
+function progress(say, label, expected) {
+  const t0 = Date.now();
+  return (g, t) => {
+    const tot = t || expected || 0, sec = Math.max(0.3, (Date.now() - t0) / 1000), sp = g / sec;
+    let m = label + ' ' + mb(g) + (tot ? ' / ' + mb(Math.max(tot, g)) : '') + ' MB';
+    if (tot) m += ' (' + Math.min(t ? 100 : 99, Math.round(g / tot * 100)) + '%)';
+    if (g > 262144) m += ' · ' + (sp / 1048576).toFixed(1) + ' MB/dtk' + (tot && sp > 0 && tot > g ? ' · sisa ±' + Math.ceil((tot - g) / sp) + ' dtk' : '');
+    say(m);
+  };
+}
+async function viaHub(base, { uid, pid }, status, expected) {
   status('Mengunduh lewat server AM-HUB…');
   const res = await fetch(base + '/api/download-package?uid=' + encodeURIComponent(uid) + '&pid=' + encodeURIComponent(pid), { cache: 'no-store' });
   if (!res.ok) { let m = ''; try { m = (await res.json()).error || ''; } catch (e) { /* abaikan */ } throw new Error('HTTP ' + res.status + (m ? ' ' + m : '')); }
-  const total = +res.headers.get('content-length') || 0, rd = res.body.getReader(), parts = []; let got = 0;
-  for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); got += value.length; status('Mengunduh (AM-HUB)… ' + mb(got) + (total ? ' / ' + mb(total) : '') + ' MB'); }
+  const total = +res.headers.get('content-length') || 0, rd = res.body.getReader(), parts = [], pg = progress(status, 'Mengunduh (AM-HUB)…', expected); let got = 0;
+  for (;;) { if (job && job.cancelled) throw cancelErr(); const { done, value } = await rd.read(); if (done) break; parts.push(value); got += value.length; pg(got, total); }
   return new Blob(parts);
 }
-async function fetchPackage({ uid, pid }, status) {
+async function fetchPackage({ uid, pid }, status, expected) {
   const hub = hubGet(); let hubErr = '';
-  if (hub) { try { return await viaHub(hub, { uid, pid }, status); } catch (e) { hubErr = 'server AM-HUB (' + hub + '): ' + e.message; status('Server AM-HUB gagal, mencoba jalur lain…'); } }
-  try { return await fetchDirect({ uid, pid }, status); }
+  if (hub) { try { return await viaHub(hub, { uid, pid }, status, expected); } catch (e) { hubErr = 'server AM-HUB (' + hub + '): ' + e.message; status('Server AM-HUB gagal, mencoba jalur lain…'); } }
+  try { return await fetchDirect({ uid, pid }, status, expected); }
   catch (e) { throw new Error(e.message + (hubErr ? ' | ' + hubErr : '')); }
 }
-async function fetchDirect({ uid, pid }, status) {
+async function fetchDirect({ uid, pid }, status, expected) {
   const path = encodeURIComponent('share/u/' + uid + '/p/' + pid + '/projectfiles.zip');
   const base = FB + '/v0/b/' + BUCKET + '/o/' + path;
   status('Membaca info paket…');
   const meta = await tryFetch(base, 'json');
   const tok = meta && meta.downloadTokens && String(meta.downloadTokens).split(',')[0];
   if (!tok) throw new Error('Paket ini tidak punya token unduhan (mungkin privat atau bukan paket proyek)');
-  const blob = await tryFetch(base + '?alt=media&token=' + tok, 'blob', (g, t) => status('Mengunduh paket… ' + mb(g) + (t ? ' / ' + mb(t) : '') + ' MB'));
+  const blob = await tryFetch(base + '?alt=media&token=' + tok, 'blob', progress(status, 'Mengunduh paket…', expected));
   return blob;
 }
 
-/** kenali jenis file dari tanda awal isi (untuk file tanpa/dengan ekstensi aneh) */
-async function sniff(blob) {
+/** v3.92: tebak ekstensi dari isi file (media di paket kadang tanpa ekstensi / ekstensi aneh) */
+const KNOWN_EXT = /\.(png|jpe?g|webp|gif|bmp|heic|avif|mp4|m4v|mov|webm|mkv|3gp|mp3|m4a|aac|wav|ogg|opus|flac)$/i;
+async function sniffExt(b) {
   try {
-    const u = new Uint8Array(await blob.slice(0, 16).arrayBuffer()), a = (i, str) => [...str].every((c, k) => u[i + k] === c.charCodeAt(0));
-    if (u[0] === 0xFF && u[1] === 0xD8) return { ext: 'jpg', mime: 'image/jpeg' };
-    if (u[0] === 0x89 && a(1, 'PNG')) return { ext: 'png', mime: 'image/png' };
-    if (a(0, 'GIF8')) return { ext: 'gif', mime: 'image/gif' };
-    if (a(0, 'RIFF') && a(8, 'WEBP')) return { ext: 'webp', mime: 'image/webp' };
-    if (a(0, 'RIFF') && a(8, 'WAVE')) return { ext: 'wav', mime: 'audio/wav' };
-    if (a(4, 'ftyp')) return a(8, 'M4A') ? { ext: 'm4a', mime: 'audio/mp4' } : { ext: 'mp4', mime: 'video/mp4' };
-    if (a(0, 'OggS')) return { ext: 'ogg', mime: 'audio/ogg' };
-    if (a(0, 'fLaC')) return { ext: 'flac', mime: 'audio/flac' };
-    if (a(0, 'ID3') || (u[0] === 0xFF && (u[1] & 0xE0) === 0xE0)) return { ext: 'mp3', mime: 'audio/mpeg' };
-    if (u[0] === 0x1A && u[1] === 0x45 && u[2] === 0xDF && u[3] === 0xA3) return { ext: 'webm', mime: 'video/webm' };
+    const u = new Uint8Array(await b.slice(0, 32).arrayBuffer()), s = (n, o) => String.fromCharCode(...u.slice(o || 0, (o || 0) + n));
+    if (u[0] === 0x89 && s(3, 1) === 'PNG') return 'png';
+    if (u[0] === 0xFF && u[1] === 0xD8) return 'jpg';
+    if (s(3) === 'GIF') return 'gif';
+    if (s(4) === 'RIFF' && s(4, 8) === 'WEBP') return 'webp';
+    if (s(4) === 'RIFF' && s(4, 8) === 'WAVE') return 'wav';
+    if (s(4, 4) === 'ftyp') { const br = s(4, 8); return /^M4[ABP]/.test(br) ? 'm4a' : br === 'qt  ' ? 'mov' : 'mp4'; }
+    if (u[0] === 0x1A && u[1] === 0x45 && u[2] === 0xDF && u[3] === 0xA3) return 'webm';
+    if (s(3) === 'ID3') return 'mp3';
+    if (u[0] === 0xFF && (u[1] & 0xE0) === 0xE0) return (u[1] & 0x06) === 0 ? 'aac' : 'mp3';
+    if (s(4) === 'OggS') return 'ogg';
+    if (s(4) === 'fLaC') return 'flac';
   } catch (e) { /* abaikan */ }
-  return null;
+  return '';
 }
-/** ZIP -> { xmls:[File], media:[File] } */
+
+/** ZIP -> { xmls:[File], media:[File], bad:[string] } ; satu entri rusak tidak menggagalkan seluruh paket */
 async function unpack(zipBlob) {
-  const z = await ML.zip.read(zipBlob), xmls = [], media = [];
+  const z = await ML.zip.read(zipBlob), xmls = [], media = [], bad = [];
   for (const n of z.names) {
     if (/\/$/.test(n) || /(^|\/)(__MACOSX|\.)/.test(n)) continue;
     const nm = n.split('/').pop(); if (!nm || /manifest\.txt$/i.test(nm)) continue;
-    const b = await z.get(n); if (!b) continue;
-    let fn = nm, ty = /\.xml$/i.test(nm) ? 'text/xml' : (b.type || '');
-    if (!/\.xml$/i.test(nm)) { const sg = await sniff(b); if (sg && !/\.(png|jpe?g|webp|gif|bmp|heic|avif|mp4|m4v|mov|webm|mkv|mp3|m4a|aac|ogg|opus|wav|flac)$/i.test(nm)) { fn = nm.replace(/\.+$/, '') + '.' + sg.ext; ty = sg.mime; } else if (sg && !ty) ty = sg.mime; }
-    const f = new File([b], fn, { type: ty });
-    (/\.xml$/i.test(nm) ? xmls : media).push(f);
+    let b = null; try { b = await z.get(n); } catch (e) { bad.push(nm + ' — ' + e.message); continue; }
+    if (!b) { bad.push(nm + ' — kosong'); continue; }
+    if (/\.xml$/i.test(nm)) { xmls.push(new File([b], nm, { type: 'text/xml' })); continue; }
+    let name = nm;
+    if (!KNOWN_EXT.test(nm)) { const ex = await sniffExt(b); if (ex) name = nm + '.' + ex; }
+    media.push(new File([b], name, { type: b.type || '' }));
   }
-  return { xmls, media };
+  return { xmls, media, bad };
+}
+
+/** v3.92: layar tunggu impor link: spinner, langkah, status, bar unduhan, hitung waktu, tombol batal (supaya proses lama tidak dikira error) */
+const STEPS = ['Membaca info paket', 'Mengunduh paket', 'Membuka paket', 'Mengimpor proyek & media'];
+function waitUi(onCancel) {
+  const back = h('div', { class: 'backdrop' }), box = h('div', { class: 'sheet dlg' }), body = h('div', { class: 'sheet-body' });
+  const mid = (t, st) => h('p', { class: 'dlg-text', style: 'text-align:center;' + (st || ''), text: t });
+  const stepEls = STEPS.map(t => h('div', { class: 'amw-step', text: t }));
+  const pct = h('div', { class: 'amw-pct', style: 'text-align:center;font-weight:800;font-size:22px;margin:4px 0;display:none' }), status = mid('Menyiapkan…', 'font-size:13px'), time = mid('', 'font-size:12px;opacity:.7;margin-top:2px'), bar = h('i'), prog = h('div', { class: 'prog amw-ind' }, bar);
+  const hint = mid('Masih berjalan, bukan macet. Paket besar atau koneksi lambat memang butuh waktu. Mohon tunggu, jangan tutup halaman.', 'font-size:13px'); hint.style.display = 'none';
+  let closed = false, t0 = Date.now(), cur = 0;
+  const iv = setInterval(() => { const sec = Math.round((Date.now() - t0) / 1000); time.textContent = 'Berjalan ' + sec + ' dtk'; if (sec >= 8) hint.style.display = ''; }, 1000);
+  const handler = () => { ML.confirmTap('Tekan kembali sekali lagi untuk membatalkan impor', () => onCancel()); return true; };
+  function close() { if (closed) return; closed = true; clearInterval(iv); ML.popBack(handler); back.classList.remove('open'); setTimeout(() => back.remove(), 180); }
+  function step(i) { cur = i; pct.style.display = 'none'; stepEls.forEach((e, k) => { e.className = 'amw-step' + (k < i ? ' done' : k === i ? ' now' : ''); }); prog.classList.add('amw-ind'); bar.style.width = ''; }
+  function say(m) {
+    status.textContent = m;
+    const x = String(m).match(/([\d.]+)\s*\/\s*([\d.]+)\s*MB/);
+    if (x && +x[2] > 0) { const p = Math.min(100, +x[1] / +x[2] * 100); prog.classList.remove('amw-ind'); bar.style.width = p.toFixed(1) + '%'; pct.style.display = ''; pct.textContent = Math.round(p) + '%'; }
+    else { pct.style.display = 'none'; if (/Mengunduh/.test(m) && cur === 1) prog.classList.add('amw-ind'); }
+  }
+  box.append(h('div', { class: 'sheet-head' }, h('span', { class: 'sheet-title', text: 'Mengimpor dari link AM' })), body);
+  body.append(h('div', { class: 'amw-spin' }), mid('Mohon tunggu sebentar…', 'font-weight:700;font-size:16px'),
+    mid('Sedang mendapatkan data dari link. Proses ini normal dan bisa makan waktu beberapa saat.'),
+    h('div', { class: 'amw-steps' }, ...stepEls), pct, prog, status, time, hint,
+    h('div', { class: 'btn-row' }, h('button', { class: 'btn ghost', text: 'Batalkan', onclick: () => onCancel() })));
+  back.append(box); ML.$('#overlays').append(back); requestAnimationFrame(() => back.classList.add('open')); ML.pushBack(handler);
+  step(0);
+  return { say, step, close };
 }
 
 async function run(input, opt = {}) {
-  let ids = parseLink(input);
-  const toastS = m => ML.toast(m, 60000);
+  let ids = parseLink(input), ui = null;
+  job = { cancelled: false, abort: null, say: null };
+  const J = job;
+  const cancel = () => { J.cancelled = true; try { if (J.abort) J.abort(); } catch (e) { /* abaikan */ } if (ui) ui.close(); ui = null; ML.toast('Impor dibatalkan', 1800); };
+  const show = i => { ui = waitUi(cancel); J.say = ui.say; ui.step(i); };
+  const say = m => { if (ui) ui.say(m); }, clr = () => { if (ui) ui.close(); ui = null; };
+  const live = () => { if (J.cancelled) throw cancelErr(); };
+  show(0);
   try {
     if (!ids) { // link pendek alight.link: coba ikuti pengalihan
-      toastS('Membuka link pendek…');
+      say('Membuka link pendek…');
       const u = String(input).trim().replace(/^(?!https?:)/, 'https://');
-      for (const r of (IS_APP() ? [4] : [-1, 1, 2])) { try { const res = await fetch(r < 0 ? u : PROXIES[r](u)); ids = parseLink(res.headers.get('x-final-url') || '') || parseLink(res.url) || parseLink(await res.text()); if (ids) break; } catch (e) { /* lanjut */ } }
+      for (const r of (IS_APP() ? [4] : [-1, 1, 2])) { live(); try { const res = await fetch(r < 0 ? u : PROXIES[r](u)); ids = parseLink(res.headers.get('x-final-url') || '') || parseLink(res.url) || parseLink(await res.text()); if (ids) break; } catch (e) { /* lanjut */ } }
+      live();
       if (!ids) throw new Error('Link pendek tidak bisa dibuka dari sini. Buka link itu di browser, lalu salin link panjangnya (…/am/share/u/…/p/…)');
     }
-    toastS('Membaca info paket…');
-    const meta = await fetchMeta(ids);
-    if (meta && !meta.free) ML.toast('Paket ' + mb(meta.size) + ' MB (di AM = PRO). Tetap dicoba…', 3000);
-    const zipBlob = await fetchPackage(ids, toastS);
-    toastS('Membuka paket (' + mb(zipBlob.size) + ' MB)…');
-    const { xmls, media } = await unpack(zipBlob);
+    say('Membaca info paket…');
+    const meta = await fetchMeta(ids); live();
+    if (meta && !meta.free) say('Paket besar (' + mb(meta.size) + ' MB, di AM = PRO). Tetap dicoba…');
+    ui.step(1);
+    const zipBlob = await fetchPackage(ids, say, meta && meta.size); live();
+    ui.step(2); say('Membuka paket (' + mb(zipBlob.size) + ' MB)…');
+    const { xmls, media, bad: badEntries } = await unpack(zipBlob); live();
+    if (badEntries.length) ML.toast(badEntries.length + ' file di paket tidak bisa dibuka: ' + badEntries.slice(0, 2).join('; '), 6000);
     if (!xmls.length) throw new Error('Tidak ada file XML proyek di dalam paket');
     clr();
     let pick = xmls;
     if (xmls.length > 1 && !opt.all) pick = await choose(xmls, media, meta);
     if (!pick || !pick.length) return null;
+    if (J.cancelled) return null;
     if (ML.editVer() !== 'am') ML.setEditVer('am');
+    show(3);
     const reps = [];
     for (let i = 0; i < pick.length; i++) {
-      toastS('Mengimpor ' + (i + 1) + '/' + pick.length + ': ' + pick[i].name + '…');
+      live(); say('Mengimpor ' + (i + 1) + '/' + pick.length + ': ' + pick[i].name + ' (' + media.length + ' media; video besar bisa lebih lama)…');
       try { reps.push(await ML.importAMXML([pick[i], ...media])); }
       catch (e) { reps.push({ name: pick[i].name, error: e.message, layers: 0, missingMedia: [], fxSkipped: [], skipped: [] }); }
     }
@@ -166,7 +225,7 @@ async function run(input, opt = {}) {
     const ok = reps.filter(r => r.id);
     if (!ok.length) throw new Error(reps[0] && reps[0].error || 'Impor gagal');
     ML.amLast = ok[ok.length - 1].id;
-    const bad = r => r.missingMedia.length || r.fxSkipped.length || r.skipped.length || r.shapeUnknown || (r.groups && r.groups.length);
+    const bad = r => r.missingMedia.length || (r.unreadable && r.unreadable.length) || (r.unused && r.unused.length) || r.fxSkipped.length || r.skipped.length || r.shapeUnknown || (r.groups && r.groups.length);
     if (ok.length === 1 && reps.length === 1) {
       ML.toast('Proyek “' + ok[0].name + '” diimpor dari link');
       if (bad(ok[0])) ML.amReportSheet('Hasil impor dari link', ok[0], true); else ML.openEditor(ok[0].id);
@@ -174,9 +233,10 @@ async function run(input, opt = {}) {
     return ok;
   } catch (e) {
     clr();
+    if ((e && e.cancel) || J.cancelled) return null;
     ML.dialog({ title: 'Gagal impor dari link AM', text: e.message + (/terhubung/.test(e.message) ? ' — Solusi: jalankan server AM-HUB (folder tools/amhub), lalu isi alamatnya di Link AM > Server AM-HUB. Atau unduh paket ZIP-nya dan pakai “Impor XML (AM)”.' : ''), ok: 'OK', cancel: null });
     return null;
-  }
+  } finally { if (job === J) job = null; }
 }
 
 function choose(xmls, media, meta) {
@@ -184,7 +244,7 @@ function choose(xmls, media, meta) {
   return new Promise(res => {
     let done = false; const fin = v => { if (!done) { done = true; res(v); } };
     ML.sheet('Paket berisi ' + xmls.length + ' proyek', (b, close) => {
-      b.append(h('p', { class: 'dlg-text', text: (meta && meta.title ? meta.title + ' · ' : '') + 'Media: ' + media.length + ' file' + (meta && meta.effects.length ? ' · Efek dipakai: ' + meta.effects.length : '') + '. Pilih proyek yang mau diimpor.' }));
+      b.append(h('p', { class: 'dlg-text', text: (meta && meta.title ? meta.title + ' · ' : '') + 'XML: ' + xmls.length + ' · Media: ' + media.length + ' file' + (meta && meta.effects.length ? ' · Efek dipakai: ' + meta.effects.length : '') + '. Pilih proyek yang mau diimpor.' }));
       b.append(h('button', { class: 'row-btn on', text: 'Impor semua (' + xmls.length + ')', onclick: () => { fin(xmls); close(); } }));
       xmls.forEach((f, i) => b.append(h('button', { class: 'row-btn', text: (ttl(i) || f.name.replace(/\.xml$/i, '')) + ' · ' + mb(f.size) + ' MB', onclick: () => { fin([f]); close(); } })));
     }, { onClose: () => fin(null) });
@@ -205,7 +265,7 @@ function summary(reps, bad) {
 }
 
 ML.amLink = {
-  isLink, parseLink, run,
+  isLink, parseLink, run, _progress: progress,
   hubGet, hubSet,
   /** sheet tempel link -> impor */
   open: () => ML.sheet('Impor dari link Alight Motion', (b, close) => {

@@ -40,7 +40,15 @@ ML.importML = async blob => {
   return id;
 };
 
-ML.exportFileName = (proj, ext) => (proj.name || 'MotionLyn').replace(/[\\/:*?"<>|]+/g, '_').trim() + '.' + ext;
+/* v0.4.6: MotionLyn<JENIS>-<NAMA_PROYEK>_[<KODE_ACAK>].<ekstensi>
+   V = video (mp4/webm), PNG, JPG, ML (proyek .ml), AMXML (XML Alight Motion); lainnya: GIF, SEQ (urutan gambar zip), AMXMLZIP (xml+media zip). Kode acak 6 karakter, baru tiap ekspor. */
+ML.exportCode = () => { const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = new Uint8Array(6); try { crypto.getRandomValues(r); } catch (e) { for (let i = 0; i < 6; i++) r[i] = Math.floor(Math.random() * 256); } return Array.from(r, b => A[b % A.length]).join(''); };
+ML.exportFileName = (proj, ext, tag) => {
+  const E = String(ext || '').toLowerCase().replace(/^\./, '');
+  const T = tag || ({ mp4: 'V', webm: 'V', mov: 'V', m4v: 'V', png: 'PNG', jpg: 'JPG', jpeg: 'JPG', ml: 'ML', xml: 'AMXML', gif: 'GIF' }[E] || E.toUpperCase());
+  const nm = String((proj && proj.name) || 'Proyek').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, '_').replace(/^[._]+/, '').slice(0, 60) || 'Proyek';
+  return 'MotionLyn' + T + '-' + nm + '_[' + ML.exportCode() + '].' + E;
+};
 
 /* ===== Ekspor video v2: per-frame (tepat waktu, bebas lag) via WebCodecs + muxer MP4 sendiri ===== */
 const MP4 = (() => {
@@ -135,17 +143,23 @@ async function pickVideoCfg(W, H, fps, bps, force) {
 
 /** campur semua layer audio/video menjadi satu AudioBuffer 48 kHz stereo (offline, tepat waktu) */
 async function mixAudio(proj, dur, ctl) {
+  ML.media.hold = (ML.media.hold || 0) + 1; // v3.91: ekspor langsung kualitas penuh, tanpa berbagi CPU dengan gelombang timeline
+  try { return await mixAudio0(proj, dur, ctl); } finally { ML.media.hold = Math.max(0, ML.media.hold - 1); }
+}
+async function mixAudio0(proj, dur, ctl) {
   const SR = ML.mixSR || +(ML.lsGet('ml.asr') || 48000), layers = proj.layers.filter(L => (L.type === 'audio' || L.type === 'video') && !L.hidden && !L.muted && L.volume > 0 && L.mediaId && ML.media.items.get(L.mediaId));
   if (!layers.length) return null;
   const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext; if (!AC) return null;
   const off = new AC(2, Math.max(1, Math.ceil(dur * SR)), SR), dec = new Map(); let used = 0;
+  const ids = [...new Set(layers.map(L => L.mediaId))]; // v3.90: decode semua media unik sekaligus (bukan satu-satu)
+  await Promise.all(ids.map(async id => {
+    let b = null;
+    try { b = await new AC(2, 1, SR).decodeAudioData(await ML.media.items.get(id).blob.arrayBuffer()); } catch (e) { b = null; }
+    dec.set(id, b);
+  }));
   for (const L of layers) {
     if (ctl.cancelled) return null;
-    let buf = dec.get(L.mediaId);
-    if (buf === undefined) {
-      try { buf = await off.decodeAudioData(await ML.media.items.get(L.mediaId).blob.arrayBuffer()); } catch (e) { buf = null; }
-      dec.set(L.mediaId, buf);
-    }
+    const buf = dec.get(L.mediaId);
     if (!buf) continue;
     const src = off.createBufferSource(), g = off.createGain(); src.buffer = buf; g.gain.value = L.volume / 100; src.connect(g); g.connect(off.destination);
     const len = Math.min(L.dur, Math.max(0, buf.duration - L.trimIn)); if (len <= 0) continue;

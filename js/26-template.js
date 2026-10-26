@@ -55,6 +55,15 @@ function fill(proj, L, it, mode) {
   ML.ensureLayer(L);
 }
 
+/* kelompok slot berbagi nama file asli yang sama (slot kosong: ph.file; slot terisi: slot.file) */
+/* v0.4.8: slot terisi hasil impor (mis. Link AM) belum punya L.slot -> pakai nama file media-nya, jadi "Ganti semua" tetap muncul untuk foto/video/audio yang dipakai berulang */
+const fileOf = s => { if (s.ph) return s.L.ph.file; if (s.L.slot && s.L.slot.file) return s.L.slot.file; const it = ML.media.items.get(mid(s.L)); return it && it.name || null; };
+function groupsOf(list) {
+  const m = new Map();
+  list.forEach(s => { const f = fileOf(s); if (!f) return; const key = norm(f) + '|' + slotKind(s); if (!m.has(key)) m.set(key, { file: f, kind: slotKind(s), slots: [] }); m.get(key).slots.push(s); });
+  return [...m.values()].filter(g => g.slots.length >= 2);
+}
+
 /** ctx: { proj, before(), after(structure), close?() } */
 function ui(ctx) {
   const proj = ctx.proj;
@@ -109,13 +118,6 @@ function ui(ctx) {
     ML.toast(ok + ' slot terisi' + (bad ? ', ' + bad + ' gagal' : '') + (files.length > todo.length ? ', ' + (files.length - todo.length) + ' file tak terpakai' : ''), 3000);
   }
 
-  /* kelompok slot berbagi nama file asli yang sama (slot kosong: ph.file; slot terisi: slot.file) */
-  const fileOf = s => s.ph ? s.L.ph.file : (s.L.slot && s.L.slot.file) || null;
-  function groupsOf(list) {
-    const m = new Map();
-    list.forEach(s => { const f = fileOf(s); if (!f) return; const key = norm(f) + '|' + slotKind(s); if (!m.has(key)) m.set(key, { file: f, kind: slotKind(s), slots: [] }); m.get(key).slots.push(s); });
-    return [...m.values()].filter(g => g.slots.length >= 2);
-  }
   async function pickIntoAll(g) {
     if (busy) return;
     const files = await ML.pickFiles(g.kind === 'audio' ? 'audio/*,.mp3,.m4a,.wav,.ogg,.opus,.flac,.aac' : 'image/*,video/*', false);
@@ -176,7 +178,7 @@ function ui(ctx) {
 }
 
 ML.tpl = {
-  slotsOf, fill,
+  slotsOf, fill, _groups: proj => groupsOf(slotsOf(proj).media),
   /** dari beranda / laporan impor: muat proyek sendiri, simpan otomatis */
   async open(pid) {
     if (ML.editor && ML.editor.proj && ML.editor.proj.id === pid) return ML.tpl.openEd(ML.editor.E);

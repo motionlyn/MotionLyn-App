@@ -1,0 +1,3 @@
+# Proxy se-origin ke penyimpanan Alight Motion (menghindari blokir CORS saat impor dari link AM)
+/amfb/*  https://firebasestorage.googleapis.com/:splat  200
+/amcf/*  https://us-central1-alight-creative.cloudfunctions.net/:splat  200

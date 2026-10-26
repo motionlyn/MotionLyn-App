@@ -15,8 +15,8 @@ android {
         applicationId "id.my.motionlyn.app"
         minSdk 29
         targetSdk 34
-        versionCode 15
-        versionName "0.2.5 beta"
+        versionCode 46
+        versionName "0.4.6 beta"
     }
 
     signingConfigs {

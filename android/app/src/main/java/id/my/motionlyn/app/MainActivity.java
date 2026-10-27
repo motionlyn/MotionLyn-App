@@ -2,13 +2,19 @@ package id.my.motionlyn.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.view.View;
@@ -32,6 +38,13 @@ public class MainActivity extends Activity {
     private HyperNative hyper;
     private ValueCallback<Uri[]> fileCallback;
     private PermissionRequest pendingPermission;
+
+    // ---- Dialog izin penyimpanan ----
+    private static final int REQ_STORAGE = 103;
+    private static final long REMIND_MS = 60_000L; // "Ingatkan nanti" -> muncul lagi tiap 1 menit
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private final Runnable remindTask = this::showStoragePrompt;
+    private AlertDialog storageDialog;
 
     // penyimpanan chunk untuk download blob
     private OutputStream saveOut;
@@ -122,6 +135,77 @@ public class MainActivity extends Activity {
         web.setDownloadListener((url, ua, cd, mime, len) -> handleDownload(url, cd, mime));
 
         if (b == null) web.loadUrl(START_URL); else web.restoreState(b);
+
+        // Saat aplikasi dibuka: minta izin penyimpanan jika belum diberikan
+        web.post(this::showStoragePrompt);
+    }
+
+    // ---------- Izin penyimpanan ----------
+    private String[] storagePerms() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            return new String[]{
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VIDEO,
+                    Manifest.permission.READ_MEDIA_AUDIO};
+        }
+        return new String[]{Manifest.permission.READ_EXTERNAL_STORAGE};
+    }
+
+    private boolean hasStorage() {
+        for (String p : storagePerms()) {
+            if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) return false;
+        }
+        return true;
+    }
+
+    private void showStoragePrompt() {
+        ui.removeCallbacks(remindTask);
+        if (isFinishing() || isDestroyed() || hasStorage()) return;
+        if (storageDialog != null && storageDialog.isShowing()) return;
+
+        storageDialog = new AlertDialog.Builder(this)
+                .setTitle("Izinkan akses penyimpanan")
+                .setMessage("Izinkan storage supaya proyek kamu tidak hilang.")
+                .setCancelable(false)
+                .setPositiveButton("Izinkan", null)
+                .setNegativeButton("Ingatkan nanti", null)
+                .create();
+        storageDialog.setOnShowListener(d -> {
+            // listener diganti di sini supaya dialog tidak tertutup otomatis;
+            // dialog baru hilang kalau izin sudah diberikan
+            storageDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> onAllowStorage());
+            storageDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+                storageDialog.dismiss();
+                ui.postDelayed(remindTask, REMIND_MS);
+            });
+        });
+        storageDialog.show();
+    }
+
+    private void onAllowStorage() {
+        SharedPreferences sp = getSharedPreferences("ml_perm", MODE_PRIVATE);
+        boolean asked = sp.getBoolean("storage_asked", false);
+        boolean rationale = false;
+        for (String p : storagePerms()) {
+            if (shouldShowRequestPermissionRationale(p)) rationale = true;
+        }
+        if (asked && !rationale) {
+            // Sudah ditolak permanen -> arahkan ke pengaturan aplikasi
+            try {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", getPackageName(), null)));
+                Toast.makeText(this, "Buka Izin lalu aktifkan Penyimpanan", Toast.LENGTH_LONG).show();
+            } catch (Exception ignored) {}
+        } else {
+            sp.edit().putBoolean("storage_asked", true).apply();
+            requestPermissions(storagePerms(), REQ_STORAGE);
+        }
+    }
+
+    private void closeStoragePromptIfGranted() {
+        if (!hasStorage()) return;
+        ui.removeCallbacks(remindTask);
+        if (storageDialog != null && storageDialog.isShowing()) storageDialog.dismiss();
     }
 
     // ---------- Download ----------
@@ -212,7 +296,9 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int req, String[] p, int[] r) {
-        if (req == REQ_PERM && pendingPermission != null) {
+        if (req == REQ_STORAGE) {
+            closeStoragePromptIfGranted();
+        } else if (req == REQ_PERM && pendingPermission != null) {
             pendingPermission.grant(pendingPermission.getResources());
             pendingPermission = null;
         }
@@ -226,6 +312,10 @@ public class MainActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle o) { super.onSaveInstanceState(o); web.saveState(o); }
     @Override protected void onPause() { super.onPause(); web.onPause(); }
-    @Override protected void onResume() { super.onResume(); web.onResume(); }
-    @Override protected void onDestroy() { hyper.off(); web.destroy(); super.onDestroy(); }
+    @Override protected void onResume() { super.onResume(); web.onResume(); closeStoragePromptIfGranted(); }
+    @Override protected void onDestroy() {
+        ui.removeCallbacksAndMessages(null);
+        if (storageDialog != null && storageDialog.isShowing()) storageDialog.dismiss();
+        hyper.off(); web.destroy(); super.onDestroy();
+    }
 }

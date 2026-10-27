@@ -23,12 +23,18 @@ jobs:
         with:
           gradle-version: 8.7
 
+      - uses: mymindstorm/setup-emsdk@v14
+
+      - name: Kompilasi mesin C++ ke WebAssembly
+        continue-on-error: true   # kalau gagal, aplikasi tetap jalan dengan JS
+        run: bash native/build-wasm.sh
+
       - name: Salin file web ke assets
         run: |
           A=android/app/src/main/assets
-          mkdir -p $A
+          mkdir -p $A engine
           cp index.html $A/
-          cp -r css js img am effects $A/
+          cp -r css js img am effects engine $A/
 
       - name: Build APK
         working-directory: android

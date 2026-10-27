@@ -62,7 +62,7 @@ ML.exportScreen = A => {
       }
       if (stop) { ML.toast('Ekspor dibatalkan'); return; }
       prog.textContent = 'Menyusun file…'; await new Promise(r => setTimeout(r, 20));
-      if (kind === 'gif') await save(ML.gifEncode(out, w, hh, Math.round(100 / f), proj.bg === 'transparent'), 'gif', 'image/gif'); else await save(await ML.zip.build(out), 'zip', 'application/zip', 'SEQ');
+      if (kind === 'gif') await save(ML.gifEncode(out, w, hh, Math.round(100 / f), proj.bg === 'transparent'), 'gif', 'image/gif'); else await save(await ML.zip.build(out), 'zip', 'application/zip', 'UGP');
     } catch (e) { ML.toast('Gagal ekspor: ' + e.message, 4500); }
     finally { ML.exporting = false; P.seek(t0); sh.close(); }
   }

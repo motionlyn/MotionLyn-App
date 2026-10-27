@@ -249,10 +249,10 @@ ML.exportAMXML = async (proj, mode) => {
   if (mode === 'zip') {
     const entries = [{ name: ML.exportFileName(proj, 'xml'), blob: xmlBlob }];
     rep.media.forEach(m => entries.push({ name: 'media/' + m.file, blob: m.blob }));
-    loc = await ML.saveBlob(await ML.zip.build(entries), ML.exportFileName(proj, 'zip', 'AMXMLZIP'), 'application/zip');
+    loc = await ML.saveBlob(await ML.zip.build(entries), ML.exportFileName(proj, 'zip', 'XML'), 'application/zip');
   } else {
     try { loc = await ML.saveBlob(xmlBlob, ML.exportFileName(proj, 'xml'), 'application/xml'); }
-    catch (e) { if (!/tidak diizinkan/.test(e.message)) throw e; loc = await ML.saveBlob(await ML.zip.build([{ name: ML.exportFileName(proj, 'xml'), blob: xmlBlob }]), ML.exportFileName(proj, 'zip', 'AMXMLZIP'), 'application/zip'); }
+    catch (e) { if (!/tidak diizinkan/.test(e.message)) throw e; loc = await ML.saveBlob(await ML.zip.build([{ name: ML.exportFileName(proj, 'xml'), blob: xmlBlob }]), ML.exportFileName(proj, 'zip', 'XML'), 'application/zip'); }
   }
   rep.loc = loc; return rep;
 };
@@ -388,7 +388,7 @@ ML.importAMXML = async files => {
   const g = (a, b) => b ? g(b, a % b) : a, gg = g(W, H);
   const bgc = parseColor(root.getAttribute('bgcolor') || '#ff000000');
   const id = ML.uid() + ML.uid();
-  const proj = { id, name: root.getAttribute('title') || src.name.replace(/\.xml$/i, '') || 'Proyek AM', createdAt: Date.now(), updatedAt: Date.now(), w: W, h: H,
+  const proj = { id, name: root.getAttribute('title') || (ML.rename ? ML.rename.stem(src.name) : src.name.replace(/\.xml$/i, '')) || 'Proyek AM', createdAt: Date.now(), updatedAt: Date.now(), w: W, h: H,
     fps: Math.max(1, Math.round(num(root.getAttribute('fps'), 30))), ratio: (W / gg) + ':' + (H / gg), resLabel: Math.min(W, H) + 'p', bg: bgc.a === 0 ? 'transparent' : hexOf(bgc),
     markers: [], layers: [], thumb: null, size: 0, dur: 0 };
   rep.name = proj.name;

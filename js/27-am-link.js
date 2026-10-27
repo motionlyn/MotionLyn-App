@@ -182,7 +182,7 @@ function waitUi(onCancel) {
 }
 
 async function run(input, opt = {}) {
-  let ids = parseLink(input), ui = null;
+  let ids = parseLink(input), ui = null, meta = null, zipBlob = null, ghErr = '';
   job = { cancelled: false, abort: null, say: null };
   const J = job;
   const cancel = () => { J.cancelled = true; try { if (J.abort) J.abort(); } catch (e) { /* abaikan */ } if (ui) ui.close(); ui = null; ML.toast('Impor dibatalkan', 1800); };
@@ -191,18 +191,25 @@ async function run(input, opt = {}) {
   const live = () => { if (J.cancelled) throw cancelErr(); };
   show(0);
   try {
-    if (!ids) { // link pendek alight.link: coba ikuti pengalihan
-      say('Membuka link pendek…');
-      const u = String(input).trim().replace(/^(?!https?:)/, 'https://');
-      for (const r of (IS_APP() ? [4] : [-1, 1, 2])) { live(); try { const res = await fetch(r < 0 ? u : PROXIES[r](u)); ids = parseLink(res.headers.get('x-final-url') || '') || parseLink(res.url) || parseLink(await res.text()); if (ids) break; } catch (e) { /* lanjut */ } }
-      live();
-      if (!ids) throw new Error('Link pendek tidak bisa dibuka dari sini. Buka link itu di browser, lalu salin link panjangnya (…/am/share/u/…/p/…)');
+    if (ML.amGh && ML.amGh.ready()) { // v3.96: server GitHub yang mengunduh paketnya (bukan browser/HP), bebas CORS
+      ui.step(1);
+      try { const r = await ML.amGh.fetch({ input, ids }, say, J); live(); zipBlob = r.blob; meta = r.meta || null; }
+      catch (e) { if ((e && e.cancel) || J.cancelled) throw e; ghErr = e.message; say('Server GitHub gagal. Mencoba jalur langsung…'); ui.step(0); }
     }
-    say('Membaca info paket…');
-    const meta = await fetchMeta(ids); live();
-    if (meta && !meta.free) say('Paket besar (' + mb(meta.size) + ' MB, di AM = PRO). Tetap dicoba…');
-    ui.step(1);
-    const zipBlob = await fetchPackage(ids, say, meta && meta.size); live();
+    if (!zipBlob) {
+      if (!ids) { // link pendek alight.link: coba ikuti pengalihan
+        say('Membuka link pendek…');
+        const u = String(input).trim().replace(/^(?!https?:)/, 'https://');
+        for (const r of (IS_APP() ? [4] : [-1, 1, 2])) { live(); try { const res = await fetch(r < 0 ? u : PROXIES[r](u)); ids = parseLink(res.headers.get('x-final-url') || '') || parseLink(res.url) || parseLink(await res.text()); if (ids) break; } catch (e) { /* lanjut */ } }
+        live();
+        if (!ids) throw new Error('Link pendek tidak bisa dibuka dari sini. Buka link itu di browser, lalu salin link panjangnya (…/am/share/u/…/p/…)');
+      }
+      say('Membaca info paket…');
+      meta = await fetchMeta(ids); live();
+      if (meta && !meta.free) say('Paket besar (' + mb(meta.size) + ' MB, di AM = PRO). Tetap dicoba…');
+      ui.step(1);
+      zipBlob = await fetchPackage(ids, say, meta && meta.size); live();
+    }
     ui.step(2); say('Membuka paket (' + mb(zipBlob.size) + ' MB)…');
     const { xmls, media, bad: badEntries } = await unpack(zipBlob); live();
     if (badEntries.length) ML.toast(badEntries.length + ' file di paket tidak bisa dibuka: ' + badEntries.slice(0, 2).join('; '), 6000);
@@ -234,7 +241,7 @@ async function run(input, opt = {}) {
   } catch (e) {
     clr();
     if ((e && e.cancel) || J.cancelled) return null;
-    ML.dialog({ title: 'Gagal impor dari link AM', text: e.message + (/terhubung/.test(e.message) ? ' — Solusi: jalankan server AM-HUB (folder tools/amhub), lalu isi alamatnya di Link AM > Server AM-HUB. Atau unduh paket ZIP-nya dan pakai “Impor XML (AM)”.' : ''), ok: 'OK', cancel: null });
+    ML.dialog({ title: 'Gagal impor dari link AM', text: e.message + (ghErr ? '\n\nServer GitHub: ' + ghErr : '') + (/terhubung/.test(e.message) ? ' — Solusi: jalankan server AM-HUB (folder tools/amhub), lalu isi alamatnya di Link AM > Server AM-HUB. Atau unduh paket ZIP-nya dan pakai “Impor XML (AM)”.' : ''), ok: 'OK', cancel: null });
     return null;
   } finally { if (job === J) job = null; }
 }
@@ -275,8 +282,10 @@ ML.amLink = {
       const v = await ML.dialog({ title: 'Server AM-HUB', text: 'Alamat server AM-HUB (jalur cadangan, mis. http://localhost:3000). Kosongkan untuk tidak memakai. Server ada di folder tools/amhub.', input: true, value: hubGet(), ok: 'Simpan' });
       if (v !== null) { hubSet(v); hubBtn.textContent = hubTxt(); }
     } });
+    const ghTxt = () => ML.amGh && ML.amGh.ready() ? 'Server GitHub: aktif' : 'Server GitHub: belum diatur';
+    const ghBtn = h('button', { class: 'btn ghost', text: ghTxt(), onclick: () => { close(); ML.amGh.settings(() => ML.amLink.open()); } });
     b.append(h('p', { class: 'dlg-text', text: 'Tempel link bagikan AM. Isi paket (XML + media) langsung diimpor; tinggal ganti media lewat Editor Template.' }), inp,
-      h('div', { class: 'btn-row' }, hubBtn, h('button', { class: 'btn primary', text: 'Impor', onclick: () => { const v = inp.value.trim(); if (!v) return; close(); run(v); } })));
+      h('div', { class: 'btn-row' }, ghBtn, hubBtn, h('button', { class: 'btn primary', text: 'Impor', onclick: () => { const v = inp.value.trim(); if (!v) return; close(); run(v); } })));
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') { const v = inp.value.trim(); if (v) { close(); run(v); } } });
     setTimeout(() => inp.focus(), 250);
   })

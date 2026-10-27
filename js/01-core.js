@@ -1,5 +1,6 @@
 'use strict';
-window.ML = { VERSION: '0.4.7', LABEL: '0.4.7 beta · build 3.95' };
+window.ML = { VERSION: '0.5.1', LABEL: '0.5.1 beta · build 4.00' };
+ML.isApp = !!window.AndroidBridge || location.hostname === 'appassets.androidplatform.net'; // true di APK, false di web
 (function () {
 const memLS = {};
 /* localStorage bisa melempar error (iframe/sandbox); jatuh ke memori bila tak tersedia */
@@ -320,6 +321,10 @@ ML.saveBlob = async function (blob, name, mime, onProgress) {
     const loc = N.saveEnd();
     if (String(loc).startsWith('error')) throw new Error(loc);
     return loc + '/' + name;
+  }
+  if (ML.saveDir && ML.saveDir.supported) { // web desktop: tulis ke <folder induk>/MotionLynWeb bila pengguna sudah memilih folder
+    const loc = await ML.saveDir.write(blob, name);
+    if (loc) return loc;
   }
   if (ML.dl) {
     const fname = ML.ext(name) === 'ml' ? name + '.zip' : name;

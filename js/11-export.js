@@ -40,15 +40,7 @@ ML.importML = async blob => {
   return id;
 };
 
-/* v0.4.6: MotionLyn<JENIS>-<NAMA_PROYEK>_[<KODE_ACAK>].<ekstensi>
-   V = video (mp4/webm), PNG, JPG, ML (proyek .ml), AMXML (XML Alight Motion); lainnya: GIF, SEQ (urutan gambar zip), AMXMLZIP (xml+media zip). Kode acak 6 karakter, baru tiap ekspor. */
-ML.exportCode = () => { const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = new Uint8Array(6); try { crypto.getRandomValues(r); } catch (e) { for (let i = 0; i < 6; i++) r[i] = Math.floor(Math.random() * 256); } return Array.from(r, b => A[b % A.length]).join(''); };
-ML.exportFileName = (proj, ext, tag) => {
-  const E = String(ext || '').toLowerCase().replace(/^\./, '');
-  const T = tag || ({ mp4: 'V', webm: 'V', mov: 'V', m4v: 'V', png: 'PNG', jpg: 'JPG', jpeg: 'JPG', ml: 'ML', xml: 'AMXML', gif: 'GIF' }[E] || E.toUpperCase());
-  const nm = String((proj && proj.name) || 'Proyek').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, '_').replace(/^[._]+/, '').slice(0, 60) || 'Proyek';
-  return 'MotionLyn' + T + '-' + nm + '_[' + ML.exportCode() + '].' + E;
-};
+/* Nama file ekspor/unduhan: lihat js/30-rename.js (ML.exportFileName / ML.exportCode / ML.rename). */
 
 /* ===== Ekspor video v2: per-frame (tepat waktu, bebas lag) via WebCodecs + muxer MP4 sendiri ===== */
 const MP4 = (() => {

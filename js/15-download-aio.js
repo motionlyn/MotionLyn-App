@@ -14,9 +14,10 @@ ML.aio = (() => {
     if (!r.ok || j.success === false || j.status === false) throw new Error((j && (j.message || j.error)) || 'Gagal (' + r.status + ')');
     return j;
   }
+  let curCap = ''; // caption/judul hasil terakhir, dipakai untuk nama file
   async function save(url, type, btn) {
     const old = btn.textContent; btn.disabled = true; btn.textContent = 'Mengunduh…';
-    const name = 'MotionLyn_' + Date.now() + '.' + extOf(url, type);
+    const name = ML.exportFileName({ name: curCap || 'Media' }, extOf(url, type), 'AIO');
     try {
       const r = await fetch(url); if (!r.ok) throw new Error('HTTP ' + r.status);
       const blob = await r.blob(); ML.toast('Tersimpan: ' + await ML.saveBlob(blob, name, blob.type || 'application/octet-stream'), 4000);
@@ -31,6 +32,7 @@ ML.aio = (() => {
   };
   function render(d, res) {
     const src = d.source || d.platform || '';
+    curCap = String(d.title || '').split('\n')[0].trim() || String(src || 'Media');
     const head = h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px' });
     if (src) head.append(h('span', { class: 'dl-tag', text: 'Dari: ' + src }));
     if (dur(d.duration)) head.append(h('span', { style: 'font-size:13px;opacity:.75', text: 'Durasi ' + dur(d.duration) }));

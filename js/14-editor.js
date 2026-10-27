@@ -623,7 +623,7 @@ ML.Editor = function (proj) {
       try {
         ML.toast('Mengimpor ' + f.name, 1500);
         const it = await ML.media.importFile(proj, f, want);
-        const L = ML.makeLayer(proj, it.kind, { name: f.name.replace(/\.[^.]+$/, ''), mediaId: it.id, start: P.t, dur: it.kind === 'image' ? 5 : Math.max(0.1, it.dur), srcDur: it.dur });
+        const L = ML.makeLayer(proj, it.kind, { name: (ML.rename ? ML.rename.stem(f.name) : f.name.replace(/\.[^.]+$/, '')), mediaId: it.id, start: P.t, dur: it.kind === 'image' ? 5 : Math.max(0.1, it.dur), srcDur: it.dur });
         if (it.kind !== 'audio') [L.bw, L.bh] = ML.fitBox(it.w, it.h, proj);
         pushLayer(L);
       } catch (e) { ML.toast(e.message, 3500); }
@@ -632,7 +632,7 @@ ML.Editor = function (proj) {
   async function addRecorded(f) {
     try {
       const it = await ML.media.importFile(proj, f, 'audio');
-      pushLayer(ML.makeLayer(proj, 'audio', { name: f.name.replace(/\.[^.]+$/, ''), mediaId: it.id, start: P.t, dur: Math.max(0.1, it.dur), srcDur: it.dur }));
+      pushLayer(ML.makeLayer(proj, 'audio', { name: (ML.rename ? ML.rename.stem(f.name) : f.name.replace(/\.[^.]+$/, '')), mediaId: it.id, start: P.t, dur: Math.max(0.1, it.dur), srcDur: it.dur }));
     } catch (e) { ML.toast(e.message, 3500); }
   }
   /** ubah suara layer audio terpilih jadi cewek (layer baru, layer asli dibisukan) */

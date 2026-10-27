@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -35,17 +35,17 @@ jobs:
         run: gradle assembleRelease --no-daemon
 
       - name: Ganti nama APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk MotionLyn-0.4.6-beta.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk MotionLyn-0.5.1-beta.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: MotionLyn-APK
-          path: MotionLyn-0.4.6-beta.apk
+          path: MotionLyn-0.5.1-beta.apk
 
       - name: Publikasikan ke Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.4.6-beta
-          name: MotionLyn 0.4.6 beta
+          tag_name: v0.5.1-beta
+          name: MotionLyn 0.5.1 beta
           prerelease: true
-          files: MotionLyn-0.4.6-beta.apk
+          files: MotionLyn-0.5.1-beta.apk

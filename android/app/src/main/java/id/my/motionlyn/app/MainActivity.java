@@ -25,8 +25,11 @@ public class MainActivity extends Activity {
     private static final String HOST = "appassets.androidplatform.net";
     private static final String START_URL = "https://" + HOST + "/assets/index.html";
     private static final int REQ_FILE = 101, REQ_PERM = 102;
+    /** Folder simpan versi APK: Download/MotionLynApp (versi web: MotionLynWeb) */
+    private static final String DIR = "MotionLynApp";
 
     private WebView web;
+    private HyperNative hyper;
     private ValueCallback<Uri[]> fileCallback;
     private PermissionRequest pendingPermission;
 
@@ -59,6 +62,7 @@ public class MainActivity extends Activity {
         s.setSupportZoom(false);
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
 
+        hyper = new HyperNative(this);
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
 
         web.setWebViewClient(new WebViewClient() {
@@ -144,7 +148,7 @@ public class MainActivity extends Activity {
             try {
                 DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
                 r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, DIR + "/" + name);
                 ((DownloadManager) getSystemService(DOWNLOAD_SERVICE)).enqueue(r);
                 toast("Mengunduh " + name);
             } catch (Exception e) { fail(e.toString()); }
@@ -160,7 +164,7 @@ public class MainActivity extends Activity {
             ContentValues v = new ContentValues();
             v.put(MediaStore.Downloads.DISPLAY_NAME, name);
             if (mime != null && !mime.isEmpty()) v.put(MediaStore.Downloads.MIME_TYPE, mime);
-            v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/MotionLyn");
+            v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + DIR);
             saveUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
             saveOut = getContentResolver().openOutputStream(saveUri);
             lastName = name;
@@ -172,7 +176,7 @@ public class MainActivity extends Activity {
     private void end() {
         try { if (saveOut != null) saveOut.close(); } catch (Exception ignored) {}
         saveOut = null;
-        toast("Tersimpan di Download/MotionLyn: " + lastName);
+        toast("Tersimpan di Download/" + DIR + ": " + lastName);
     }
 
     private void fail(String m) {
@@ -191,10 +195,9 @@ public class MainActivity extends Activity {
             try { if (saveOut != null) saveOut.write(Base64.decode(b64, Base64.DEFAULT)); } catch (Exception e) { fail(e.toString()); }
         }
         @JavascriptInterface public void end() { MainActivity.this.end(); }
-        @JavascriptInterface public void hyperOn(boolean v) { HyperNative.apply(MainActivity.this, web, true); }
-        @JavascriptInterface public void hyperOff(boolean v) { HyperNative.apply(MainActivity.this, web, false); }
-        @JavascriptInterface public void hyperBattery() { HyperNative.requestBatteryExemption(MainActivity.this); }
         @JavascriptInterface public void exitApp() { runOnUiThread(() -> finish()); }
+        @JavascriptInterface public void hyperOn(boolean v) { hyper.on(); }
+        @JavascriptInterface public void hyperOff(boolean v) { hyper.off(); }
         @JavascriptInterface public void fail(String m) { MainActivity.this.fail(m); }
     }
 
@@ -224,5 +227,5 @@ public class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle o) { super.onSaveInstanceState(o); web.saveState(o); }
     @Override protected void onPause() { super.onPause(); web.onPause(); }
     @Override protected void onResume() { super.onResume(); web.onResume(); }
-    @Override protected void onDestroy() { HyperNative.release(this); web.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { hyper.off(); web.destroy(); super.onDestroy(); }
 }

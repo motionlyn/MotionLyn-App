@@ -77,6 +77,7 @@ public class MainActivity extends Activity {
 
         hyper = new HyperNative(this);
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
+        web.addJavascriptInterface(new NativeSave(), "MotionLynNative"); // dipakai ML.saveBlob (js/01-core.js) agar nama file MotionLyn... terpakai
 
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -283,6 +284,40 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void hyperOn(boolean v) { hyper.on(); }
         @JavascriptInterface public void hyperOff(boolean v) { hyper.off(); }
         @JavascriptInterface public void fail(String m) { MainActivity.this.fail(m); }
+    }
+
+    /** Jembatan simpan file untuk ML.saveBlob: nama file dari JS dipakai apa adanya (MotionLynV-..., MotionLynML-..., dst). */
+    private class NativeSave {
+        @JavascriptInterface public String saveBegin(String name, String mime) {
+            try {
+                if (saveOut != null) { try { saveOut.close(); } catch (Exception ignored) {} saveOut = null; }
+                ContentValues v = new ContentValues();
+                v.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                if (mime != null && !mime.isEmpty()) v.put(MediaStore.Downloads.MIME_TYPE, mime);
+                v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + DIR);
+                saveUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                if (saveUri == null) return "error: tidak bisa membuat file";
+                saveOut = getContentResolver().openOutputStream(saveUri);
+                lastName = name;
+                return "ok";
+            } catch (Exception e) { return "error: " + e; }
+        }
+        @JavascriptInterface public boolean saveChunk(String b64) {
+            try { if (saveOut == null) return false; saveOut.write(Base64.decode(b64, Base64.DEFAULT)); return true; }
+            catch (Exception e) { return false; }
+        }
+        @JavascriptInterface public String saveEnd() {
+            try { if (saveOut != null) saveOut.close(); } catch (Exception e) { saveOut = null; return "error: " + e; }
+            saveOut = null;
+            toast("Tersimpan di Download/" + DIR + ": " + lastName);
+            return "Download/" + DIR;
+        }
+        @JavascriptInterface public void saveAbort() {
+            try { if (saveOut != null) saveOut.close(); } catch (Exception ignored) {}
+            saveOut = null;
+            try { if (saveUri != null) getContentResolver().delete(saveUri, null, null); } catch (Exception ignored) {}
+            saveUri = null;
+        }
     }
 
     // ---------- Result & lifecycle ----------

@@ -4,6 +4,7 @@ ML.zip = (() => {
   const T = new Uint32Array(256);
   for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; T[n] = c >>> 0; }
   async function crcBlob(blob) {
+    if (ML.engine && ML.engine.ready) { try { return await ML.engine.crcBlob(blob); } catch (e) { /* lanjut ke JS */ } }
     let c = 0xFFFFFFFF; const CH = 4 << 20;
     for (let i = 0; i < blob.size; i += CH) {
       const b = new Uint8Array(await blob.slice(i, i + CH).arrayBuffer());

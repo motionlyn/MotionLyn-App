@@ -1,7 +1,7 @@
 'use strict';
 /* Layar Ekspor & Bagikan: video MP4, link, paket .ml, Drive, frame PNG/JPG, urutan gambar (ZIP), GIF */
 ML.drawChecker = (ctx, W, H) => { const s = Math.max(8, Math.round(Math.min(W, H) / 40)); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = '#cfcfcf'; for (let y = 0; y * s < H; y++) for (let x = (y & 1); x * s < W; x += 2) ctx.fillRect(x * s, y * s, s, s); };
-ML.gifEncode = (frames, W, H, delay, tr) => {
+ML.gifEncodeJS = (frames, W, H, delay, tr) => {
   const o = [], w = (...a) => { for (const x of a) o.push(x); };
   for (const c of 'GIF89a') o.push(c.charCodeAt(0));
   w(W & 255, W >> 8, H & 255, H >> 8, 0xF7, 0, 0);
@@ -26,6 +26,10 @@ ML.gifEncode = (frames, W, H, delay, tr) => {
     o.push(0);
   }
   o.push(0x3B); return new Blob([new Uint8Array(o)], { type: 'image/gif' });
+};
+ML.gifEncode = (frames, W, H, delay, tr) => { // mesin C++ bila aktif, kalau tidak (atau gagal) pakai JS
+  if (ML.engine && ML.engine.ready) { try { return ML.engine.gif(frames, W, H, delay, tr); } catch (e) { /* lanjut ke JS */ } }
+  return ML.gifEncodeJS(frames, W, H, delay, tr);
 };
 ML.exportScreen = A => {
   const h = ML.h, I = ML.icon, { proj, P } = A, st = { opt: 'video', short: 0, fps: 0, alpha: 0 };

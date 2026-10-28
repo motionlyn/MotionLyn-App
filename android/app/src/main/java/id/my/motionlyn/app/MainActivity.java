@@ -302,6 +302,11 @@ public class MainActivity extends Activity {
                 return "ok";
             } catch (Exception e) { return "error: " + e; }
         }
+        /** Buka browser dalam aplikasi (BrowserActivity). Hanya http/https; selain itu dibuka ke beranda. */
+        @JavascriptInterface public void openBrowser(String url) {
+            final String u = (url != null && (url.startsWith("https://") || url.startsWith("http://"))) ? url : BrowserActivity.HOME;
+            runOnUiThread(() -> startActivity(new Intent(MainActivity.this, BrowserActivity.class).putExtra(BrowserActivity.EXTRA_URL, u)));
+        }
         @JavascriptInterface public boolean saveChunk(String b64) {
             try { if (saveOut == null) return false; saveOut.write(Base64.decode(b64, Base64.DEFAULT)); return true; }
             catch (Exception e) { return false; }

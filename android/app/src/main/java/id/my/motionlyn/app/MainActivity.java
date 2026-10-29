@@ -305,7 +305,15 @@ public class MainActivity extends Activity {
         /** Buka browser dalam aplikasi (BrowserActivity). Hanya http/https; selain itu dibuka ke beranda. */
         @JavascriptInterface public void openBrowser(String url) {
             final String u = (url != null && (url.startsWith("https://") || url.startsWith("http://"))) ? url : BrowserActivity.HOME;
-            runOnUiThread(() -> startActivity(new Intent(MainActivity.this, BrowserActivity.class).putExtra(BrowserActivity.EXTRA_URL, u)));
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent(MainActivity.this, BrowserActivity.class).putExtra(BrowserActivity.EXTRA_URL, u));
+                } catch (Throwable e) {
+                    // Cadangan: buka di browser sistem agar aplikasi tidak tertutup
+                    Toast.makeText(MainActivity.this, "Browser internal gagal: " + e, Toast.LENGTH_LONG).show();
+                    try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(u))); } catch (Throwable ignored) {}
+                }
+            });
         }
         @JavascriptInterface public boolean saveChunk(String b64) {
             try { if (saveOut == null) return false; saveOut.write(Base64.decode(b64, Base64.DEFAULT)); return true; }

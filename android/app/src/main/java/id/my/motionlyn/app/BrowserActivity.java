@@ -68,7 +68,16 @@ public class BrowserActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        try {
+            build(b);
+        } catch (Throwable t) {
+            // Jangan sampai seluruh aplikasi tertutup: tampilkan penyebabnya lalu kembali
+            Toast.makeText(this, "Browser gagal dibuka: " + t, Toast.LENGTH_LONG).show();
+            finish();
+        }
+    }
 
+    private void build(Bundle b) {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.parseColor("#1d0f26"));
@@ -183,18 +192,20 @@ public class BrowserActivity extends Activity {
         btnFwd.setAlpha(web.canGoForward() ? 1f : .35f);
     }
 
-    @Override protected void onSaveInstanceState(Bundle o) { super.onSaveInstanceState(o); web.saveState(o); }
-    @Override protected void onPause() { super.onPause(); web.onPause(); }
-    @Override protected void onResume() { super.onResume(); web.onResume(); }
+    @Override protected void onSaveInstanceState(Bundle o) { super.onSaveInstanceState(o); if (web != null) web.saveState(o); }
+    @Override protected void onPause() { super.onPause(); if (web != null) web.onPause(); }
+    @Override protected void onResume() { super.onResume(); if (web != null) web.onResume(); }
 
     @Override public void onBackPressed() {
-        if (web.canGoBack()) web.goBack(); else super.onBackPressed();
+        if (web != null && web.canGoBack()) web.goBack(); else super.onBackPressed();
     }
 
     @Override protected void onDestroy() {
-        ViewGroup p = (ViewGroup) web.getParent();
-        if (p != null) p.removeView(web);
-        web.destroy();
+        if (web != null) {
+            ViewGroup p = (ViewGroup) web.getParent();
+            if (p != null) p.removeView(web);
+            web.destroy();
+        }
         super.onDestroy();
     }
 }
